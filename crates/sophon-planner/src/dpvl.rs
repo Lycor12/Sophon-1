@@ -98,9 +98,10 @@ pub struct VerificationLoop {
 
 impl VerificationLoop {
     pub fn new(config: DvplConfig) -> Self {
+        let min_conf = config.min_confidence;
         Self {
             config,
-            gave: GaveEngine::new(config.min_confidence),
+            gave: GaveEngine::new(min_conf),
             history: Vec::new(),
         }
     }

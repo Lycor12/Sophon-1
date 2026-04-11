@@ -235,7 +235,8 @@ mod tests {
     #[test]
     fn calibration_computation() {
         let cal = CalibrationMetrics::compute(0.9, 0.85);
-        assert_eq!(cal.calibration_error, 0.05);
+        // Floating point: 0.9 - 0.85 may not equal exactly 0.05
+        assert!((cal.calibration_error - 0.05).abs() < 1e-5);
         assert!(cal.is_calibrated(0.1));
         assert!(!cal.is_calibrated(0.01));
     }
@@ -243,13 +244,13 @@ mod tests {
     #[test]
     fn generalization_computation() {
         let gen = GeneralizationMetrics::compute(0.9, 0.7);
-        assert_eq!(gen.transfer_gap, 0.2);
+        assert!((gen.transfer_gap - 0.2).abs() < 1e-5);
     }
 
     #[test]
     fn robustness_computation() {
         let rob = RobustnessMetrics::compute(0.95, 0.85);
-        assert_eq!(rob.degradation, 0.1);
+        assert!((rob.degradation - 0.1).abs() < 1e-5);
     }
 
     #[test]

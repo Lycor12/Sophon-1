@@ -23,6 +23,15 @@ pub enum VerificationStatus {
     Unknown,           // Insufficient evidence
 }
 
+/// A claim/assertion made by the system.
+#[derive(Debug, Clone)]
+pub struct Assertion {
+    pub claim: String,
+    pub evidence: EvidenceChain,
+    pub confidence: f32, // 0-1, computed from evidence
+    pub verification_status: VerificationStatus,
+}
+
 /// Evidence supporting a claim.
 #[derive(Debug, Clone)]
 pub enum Evidence {
@@ -270,6 +279,7 @@ impl GaveEngine {
 }
 
 /// Reference to an assertion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AssertionRef(usize);
 
 /// Calibrated response based on confidence.
@@ -328,12 +338,14 @@ mod tests {
         });
 
         let idx = gave.assert("x is 5", chain);
+        let idx2 = idx; // Copy for second use
         let assertion = gave.get(idx).unwrap();
-        assert!(assertion.confidence > 0.0);
+        let initial_confidence = assertion.confidence;
+        assert!(initial_confidence > 0.0);
 
         // Add verification
         gave.verify(
-            idx,
+            idx2,
             "static_analysis",
             VerificationResult {
                 success: true,
@@ -342,8 +354,8 @@ mod tests {
             },
         );
 
-        let verified = gave.get(idx).unwrap();
-        assert!(verified.confidence > assertion.confidence);
+        let verified = gave.get(idx2).unwrap();
+        assert!(verified.confidence > initial_confidence);
     }
 
     #[test]

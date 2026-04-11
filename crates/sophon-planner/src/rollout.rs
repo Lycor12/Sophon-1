@@ -41,7 +41,8 @@ impl LatentState {
             let idx = i % HDC_DIM;
             hv[idx] += val;
         }
-        l2_normalize(&hv)
+        l2_normalize(&mut hv);
+        hv
     }
 }
 
@@ -254,12 +255,15 @@ impl LatentSimulator {
         state: &LatentState,
         candidates: &[Action],
         memory: &MemoryContext,
-    ) -> Option<&Action> {
-        candidates.iter().min_by(|a, b| {
-            let cost_a = self.rollout(state, &[(*a).clone()], memory).total_cost;
-            let cost_b = self.rollout(state, &[(*b).clone()], memory).total_cost;
-            cost_a.partial_cmp(&cost_b).unwrap()
-        })
+    ) -> Option<Action> {
+        candidates
+            .iter()
+            .min_by(|a, b| {
+                let cost_a = self.rollout(state, &[(*a).clone()], memory).total_cost;
+                let cost_b = self.rollout(state, &[(*b).clone()], memory).total_cost;
+                cost_a.partial_cmp(&cost_b).unwrap()
+            })
+            .cloned()
     }
 
     fn encode_memory(&self, memory: &MemoryContext) -> Vec<f32> {
@@ -316,15 +320,6 @@ pub struct RolloutTrajectory {
     pub actions: Vec<Action>,
     pub result: RolloutResult,
     pub actual: Option<Vec<f32>>, // If executed
-}
-
-fn l2_normalize(v: &[f32]) -> Vec<f32> {
-    let norm: f32 = v.iter().map(|&x| x * x).sum::<f32>().sqrt();
-    if norm == 0.0 {
-        v.to_vec()
-    } else {
-        v.iter().map(|&x| x / norm).collect()
-    }
 }
 
 #[cfg(test)]
