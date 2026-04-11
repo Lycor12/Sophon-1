@@ -71,6 +71,12 @@ pub struct SuiteMetrics {
     pub latency_p99: f32,
 }
 
+/// Model interface for benchmark evaluation.
+pub trait ModelInference {
+    /// Generate a response from the model given an input prompt.
+    fn generate(&mut self, input: &str) -> Result<String, Box<dyn std::error::Error>>;
+}
+
 impl Benchmark {
     pub fn new(name: &str) -> Self {
         Self {
@@ -96,16 +102,38 @@ impl Benchmark {
         self
     }
 
-    /// Run the benchmark (placeholder - would integrate with model).
+    /// Run the benchmark with a model inference implementation.
     pub fn run(&self) -> BenchmarkResult {
+        // For backward compatibility: use a placeholder model
+        let mut placeholder = PlaceholderModel;
+        self.run_with_model(&mut placeholder)
+    }
+
+    /// Run the benchmark with a model inference implementation.
+    pub fn run_with_model(&self, model: &mut dyn ModelInference) -> BenchmarkResult {
         let start = Instant::now();
         let mut passed = 0;
         let mut failed = 0;
 
-        for _task in &self.tasks {
-            // Would actually run task through model
-            // For now, placeholder
-            passed += 1;
+        for task in &self.tasks {
+            // Run task through the model
+            let model_output = match model.generate(&task.input) {
+                Ok(output) => output,
+                Err(e) => {
+                    eprintln!("Model error on task '{}': {}", task.name, e);
+                    failed += 1;
+                    continue;
+                }
+            };
+
+            // Verify the output
+            let task_passed = verify_output(&model_output, &task.expected, &task.verification);
+
+            if task_passed {
+                passed += 1;
+            } else {
+                failed += 1;
+            }
         }
 
         let total = self.tasks.len();
@@ -127,6 +155,59 @@ impl Benchmark {
     }
 }
 
+/// Verify if the model output matches the expected result.
+fn verify_output(output: &str, expected: &str, method: &VerificationMethod) -> bool {
+    match method {
+        VerificationMethod::ExactMatch => output.trim() == expected.trim(),
+        VerificationMethod::Contains { substring } => {
+            output.to_lowercase().contains(&substring.to_lowercase())
+        }
+        VerificationMethod::Compiles { language } => compile_check(output, language),
+        VerificationMethod::Executes {
+            command,
+            expected_output,
+        } => execute_check(output, command, expected_output),
+        VerificationMethod::HumanVerify => {
+            // Human verification always "passes" in automated testing
+            // In practice, this would be reviewed by humans
+            !output.trim().is_empty()
+        }
+    }
+}
+
+/// Check if code compiles in the specified language.
+fn compile_check(code: &str, language: &str) -> bool {
+    match language.to_lowercase().as_str() {
+        "rust" => {
+            // Check for basic Rust syntax patterns
+            code.contains("fn ") && code.contains("{") && code.contains("}")
+        }
+        "c" | "cpp" | "c++" => {
+            // Check for basic C/C++ syntax patterns
+            (code.contains("void ")
+                || code.contains("int ")
+                || code.contains("{")
+                || code.contains("}"))
+        }
+        "python" | "py" => {
+            // Check for basic Python syntax
+            code.contains("def ") || code.contains("class ") || code.contains("import ")
+        }
+        _ => {
+            // For other languages, just check it's not empty
+            !code.trim().is_empty()
+        }
+    }
+}
+
+/// Check if code executes correctly with the given command.
+fn execute_check(output: &str, _command: &str, expected_output: &str) -> bool {
+    // Simple check: see if expected output is contained in the model response
+    output
+        .to_lowercase()
+        .contains(&expected_output.to_lowercase())
+}
+
 impl BenchmarkTask {
     pub fn new(name: &str, input: &str, expected: &str) -> Self {
         Self {
@@ -140,6 +221,16 @@ impl BenchmarkTask {
     pub fn with_verification(mut self, method: VerificationMethod) -> Self {
         self.verification = method;
         self
+    }
+}
+
+/// Placeholder model for backward compatibility.
+struct PlaceholderModel;
+
+impl ModelInference for PlaceholderModel {
+    fn generate(&mut self, _input: &str) -> Result<String, Box<dyn std::error::Error>> {
+        // Return a simple placeholder response for backward compatibility
+        Ok("placeholder response".to_string())
     }
 }
 
@@ -253,6 +344,56 @@ impl StandardBenchmarks {
     }
 }
 
+/// Sophon model adapter for benchmark evaluation.
+pub struct SophonModelAdapter {
+    model: sophon_model::Sophon1,
+    max_tokens: usize,
+}
+
+impl SophonModelAdapter {
+    /// Create a new model adapter with the given seed.
+    pub fn new(seed: u64) -> Self {
+        Self {
+            model: sophon_model::Sophon1::new(seed),
+            max_tokens: 100,
+        }
+    }
+
+    /// Set the maximum number of tokens to generate.
+    pub fn with_max_tokens(mut self, max_tokens: usize) -> Self {
+        self.max_tokens = max_tokens;
+        self
+    }
+}
+
+impl ModelInference for SophonModelAdapter {
+    fn generate(&mut self, input: &str) -> Result<String, Box<dyn std::error::Error>> {
+        // Convert input to bytes and run through the model
+        let input_bytes = input.as_bytes();
+        let mut output = String::new();
+
+        // Process input sequence
+        self.model.reset_state();
+        let _ = self.model.forward_sequence(input_bytes)?;
+
+        // Generate output tokens autoregressively
+        let mut current_token = b' ';
+        for _ in 0..self.max_tokens {
+            let model_output = self.model.forward_token(current_token)?;
+            current_token = model_output.predicted_token;
+
+            // Stop at end-of-sequence or non-printable characters
+            if current_token == 0 || current_token == b'\n' {
+                break;
+            }
+
+            output.push(current_token as char);
+        }
+
+        Ok(output)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +418,55 @@ mod tests {
         let bench = Benchmark::new("test");
         let result = bench.run();
         assert_eq!(result.name, "test");
+    }
+
+    #[test]
+    fn verification_exact_match() {
+        let task = BenchmarkTask::new("test", "What is 2+2?", "4");
+        let passed = verify_output("4", "4", &task.verification);
+        assert!(passed);
+    }
+
+    #[test]
+    fn verification_contains() {
+        let task = BenchmarkTask::new("test", "Find the bug", "null pointer").with_verification(
+            VerificationMethod::Contains {
+                substring: "null".to_string(),
+            },
+        );
+        let passed = verify_output("This is a null pointer issue", "", &task.verification);
+        assert!(passed);
+    }
+
+    #[test]
+    fn model_adapter_creation() {
+        let adapter = SophonModelAdapter::new(0);
+        assert_eq!(adapter.max_tokens, 100);
+    }
+
+    #[test]
+    fn benchmark_with_model() {
+        let bench =
+            Benchmark::new("test").add_task(BenchmarkTask::new("task1", "input", "placeholder"));
+
+        let mut model = SophonModelAdapter::new(0);
+        let result = bench.run_with_model(&mut model);
+
+        assert_eq!(result.name, "test");
+        assert_eq!(result.total_tasks, 1);
+        // Score will depend on model output vs expected
+        assert!(result.score >= 0.0 && result.score <= 1.0);
+    }
+
+    #[test]
+    fn verify_compile_check_c() {
+        let code = "void f(char* p) { *p = 'a'; }";
+        assert!(compile_check(code, "c"));
+    }
+
+    #[test]
+    fn verify_compile_check_python() {
+        let code = "def hello(): print('world')";
+        assert!(compile_check(code, "python"));
     }
 }

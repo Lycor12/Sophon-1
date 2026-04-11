@@ -706,6 +706,256 @@ pub fn execute_input(action: &InputAction) -> Result<(), ScreenError> {
 }
 
 // -------------------------------------------------------------------------
+// Hilbert Curve Spatial Encoding
+// -------------------------------------------------------------------------
+
+/// Hilbert curve spatial encoding for preserving 2D locality in 1D sequences.
+///
+/// The Hilbert curve is a continuous fractal space-filling curve that preserves
+/// spatial locality better than row-major ordering. This is useful for vision
+/// models that process images as 1D sequences.
+///
+/// Reference: https://en.wikipedia.org/wiki/Hilbert_curve
+pub struct HilbertEncoder {
+    order: u32,
+    size: u32,
+}
+
+impl HilbertEncoder {
+    /// Create a new Hilbert encoder for an image of given dimensions.
+    /// The order is determined automatically based on the larger dimension.
+    ///
+    /// # Arguments
+    /// * `width` - Image width
+    /// * `height` - Image height
+    ///
+    /// # Returns
+    /// A HilbertEncoder that can encode coordinates up to the next power of 2
+    /// that covers both dimensions.
+    pub fn for_dimensions(width: u32, height: u32) -> Self {
+        let max_dim = width.max(height);
+        let order = (32 - max_dim.saturating_sub(1).leading_zeros()).max(1);
+        let size = 1u32 << order;
+        Self { order, size }
+    }
+
+    /// Create a new Hilbert encoder with explicit order.
+    ///
+    /// # Arguments
+    /// * `order` - The order of the Hilbert curve (size = 2^order)
+    pub fn with_order(order: u32) -> Self {
+        let size = 1u32 << order;
+        Self { order, size }
+    }
+
+    /// Get the order of this encoder.
+    pub fn order(&self) -> u32 {
+        self.order
+    }
+
+    /// Get the size (width/height) of the grid this encoder handles.
+    pub fn size(&self) -> u32 {
+        self.size
+    }
+
+    /// Convert 2D coordinates to 1D Hilbert index.
+    ///
+    /// # Arguments
+    /// * `x` - X coordinate (column)
+    /// * `y` - Y coordinate (row)
+    ///
+    /// # Returns
+    /// The Hilbert curve index (0 to 2^(2*order) - 1)
+    pub fn encode(&self, x: u32, y: u32) -> u64 {
+        if self.order == 0 {
+            return 0;
+        }
+
+        // Clamp to bounds
+        let x = x.min(self.size - 1);
+        let y = y.min(self.size - 1);
+
+        Self::xy2d(self.order, x, y)
+    }
+
+    /// Convert 1D Hilbert index to 2D coordinates.
+    ///
+    /// # Arguments
+    /// * `d` - The Hilbert curve index
+    ///
+    /// # Returns
+    /// The (x, y) coordinates
+    pub fn decode(&self, d: u64) -> (u32, u32) {
+        if self.order == 0 {
+            return (0, 0);
+        }
+
+        let max_index = (1u64 << (2 * self.order)) - 1;
+        let d = d.min(max_index);
+
+        Self::d2xy(self.order, d)
+    }
+
+    /// Encode a ScreenFrame using Hilbert curve ordering.
+    ///
+    /// Returns a vector of pixels in Hilbert curve order, which preserves
+    /// 2D spatial locality better than row-major ordering.
+    pub fn encode_frame(&self, frame: &ScreenFrame) -> Vec<u8> {
+        let mut result = vec![0u8; (self.size * self.size) as usize];
+
+        for y in 0..frame.height {
+            for x in 0..frame.width {
+                let hilbert_idx = self.encode(x, y) as usize;
+                if hilbert_idx < result.len() {
+                    result[hilbert_idx] = frame.get(x, y);
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Decode Hilbert-curve ordered pixels back to a ScreenFrame.
+    ///
+    /// # Arguments
+    /// * `pixels` - Pixels in Hilbert curve order
+    /// * `width` - Target frame width
+    /// * `height` - Target frame height
+    ///
+    /// # Returns
+    /// A ScreenFrame with pixels in row-major order
+    pub fn decode_to_frame(&self, pixels: &[u8], width: u32, height: u32) -> ScreenFrame {
+        let mut frame_pixels = vec![0u8; (width * height) as usize];
+
+        for y in 0..height {
+            for x in 0..width {
+                let hilbert_idx = self.encode(x, y) as usize;
+                if hilbert_idx < pixels.len() {
+                    frame_pixels[(y * width + x) as usize] = pixels[hilbert_idx];
+                }
+            }
+        }
+
+        let timestamp_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        ScreenFrame {
+            pixels: frame_pixels,
+            width,
+            height,
+            timestamp_ms,
+        }
+    }
+
+    /// Convert (x, y) to Hilbert distance d using the Butz-Moore algorithm.
+    fn xy2d(order: u32, mut x: u32, mut y: u32) -> u64 {
+        let mut d: u64 = 0;
+        let mut s = (1u32 << (order - 1)) as u64;
+
+        while s > 0 {
+            let rx = ((x as u64 & s) != 0) as u64;
+            let ry = ((y as u64 & s) != 0) as u64;
+            d += s * s * ((3 * rx) ^ ry);
+
+            // Rotate
+            if ry == 0 {
+                if rx == 1 {
+                    x = (1u32 << order) - 1 - x;
+                    y = (1u32 << order) - 1 - y;
+                }
+                std::mem::swap(&mut x, &mut y);
+            }
+
+            s >>= 1;
+        }
+
+        d
+    }
+
+    /// Convert Hilbert distance d to (x, y) using the inverse Butz-Moore algorithm.
+    fn d2xy(order: u32, mut d: u64) -> (u32, u32) {
+        let mut x: u64 = 0;
+        let mut y: u64 = 0;
+        let mut t = d;
+        let mut s = 1u64;
+
+        for _ in 0..order {
+            let rx = 1 & (t / 2);
+            let ry = 1 & (t ^ rx);
+
+            // Rotate
+            if ry == 0 {
+                if rx == 1 {
+                    x = (1u64 << order) - 1 - x;
+                    y = (1u64 << order) - 1 - y;
+                }
+                std::mem::swap(&mut x, &mut y);
+            }
+
+            x += s * rx;
+            y += s * ry;
+            t /= 4;
+            s <<= 1;
+        }
+
+        (x as u32, y as u32)
+    }
+}
+
+/// Apply Hilbert curve spatial encoding to a frame and return as model-ready tensor.
+///
+/// This function encodes the frame using Hilbert curve ordering, which preserves
+/// 2D spatial locality when the image is processed as a 1D sequence.
+///
+/// # Arguments
+/// * `frame` - The input screen frame
+///
+/// # Returns
+/// A byte vector suitable for model input with spatial locality preserved.
+pub fn encode_frame_hilbert(frame: &ScreenFrame) -> Vec<u8> {
+    let encoder = HilbertEncoder::for_dimensions(frame.width, frame.height);
+    encoder.encode_frame(frame)
+}
+
+/// Calculate local spatial coherence score using Hilbert neighborhood.
+///
+/// Returns a score between 0 and 1 indicating how well the frame's
+/// pixel values preserve local spatial coherence (higher = more coherent).
+pub fn spatial_coherence_score(frame: &ScreenFrame) -> f32 {
+    if frame.width < 2 || frame.height < 2 {
+        return 1.0;
+    }
+
+    let encoder = HilbertEncoder::for_dimensions(frame.width, frame.height);
+    let hilbert_pixels = encoder.encode_frame(frame);
+
+    if hilbert_pixels.len() < 2 {
+        return 1.0;
+    }
+
+    // Calculate average difference between adjacent pixels in Hilbert order
+    let mut total_diff: f32 = 0.0;
+    let mut count: u32 = 0;
+
+    for i in 1..hilbert_pixels.len() {
+        let diff = (hilbert_pixels[i] as i32 - hilbert_pixels[i - 1] as i32).abs() as f32;
+        total_diff += diff;
+        count += 1;
+    }
+
+    // Normalize: lower difference = higher coherence
+    let avg_diff = if count > 0 {
+        total_diff / count as f32
+    } else {
+        0.0
+    };
+    let coherence = 1.0 - (avg_diff / 255.0);
+    coherence.max(0.0).min(1.0)
+}
+
+// -------------------------------------------------------------------------
 // Tests
 // -------------------------------------------------------------------------
 
@@ -868,5 +1118,229 @@ mod tests {
             let r = capture_screen(0, 256);
             assert!(r.is_err());
         }
+    }
+
+    #[test]
+    fn hilbert_encoder_creation() {
+        let encoder = HilbertEncoder::for_dimensions(16, 16);
+        assert_eq!(encoder.order(), 4); // 2^4 = 16
+        assert_eq!(encoder.size(), 16);
+    }
+
+    #[test]
+    fn hilbert_encoder_non_power_of_two() {
+        let encoder = HilbertEncoder::for_dimensions(10, 15);
+        assert_eq!(encoder.order(), 4); // Next power of 2 is 16
+        assert_eq!(encoder.size(), 16);
+    }
+
+    #[test]
+    fn hilbert_encode_decode_identity() {
+        let encoder = HilbertEncoder::with_order(3); // 8x8 grid
+
+        // Test that encoding and decoding are inverses
+        for x in 0..8 {
+            for y in 0..8 {
+                let d = encoder.encode(x, y);
+                let (x2, y2) = encoder.decode(d);
+                assert_eq!(
+                    (x, y),
+                    (x2, y2),
+                    "encode/decode failed at ({}, {}) -> {} -> ({}, {})",
+                    x,
+                    y,
+                    d,
+                    x2,
+                    y2
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hilbert_encode_monotonic() {
+        let encoder = HilbertEncoder::with_order(2); // 4x4 grid
+
+        // Hilbert indices should be in range [0, 2^(2*order))
+        let max_index = (1u64 << (2 * encoder.order())) - 1;
+
+        for x in 0..4 {
+            for y in 0..4 {
+                let d = encoder.encode(x, y);
+                assert!(
+                    d <= max_index,
+                    "Index {} out of range for ({}, {})",
+                    d,
+                    x,
+                    y
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hilbert_neighbors_are_close() {
+        // Adjacent pixels in 2D should have close Hilbert indices
+        let encoder = HilbertEncoder::with_order(3);
+
+        // Check that neighboring pixels have adjacent or nearby indices
+        let d00 = encoder.encode(0, 0);
+        let d10 = encoder.encode(1, 0);
+        let d01 = encoder.encode(0, 1);
+
+        // The indices should be relatively close (though not necessarily adjacent)
+        let diff1 = (d10 as i64 - d00 as i64).abs();
+        let diff2 = (d01 as i64 - d00 as i64).abs();
+
+        // Differences should be small for neighbors
+        assert!(
+            diff1 < 10,
+            "Hilbert curve not preserving locality: d(0,0)={}, d(1,0)={}, diff={}",
+            d00,
+            d10,
+            diff1
+        );
+        assert!(
+            diff2 < 10,
+            "Hilbert curve not preserving locality: d(0,0)={}, d(0,1)={}, diff={}",
+            d00,
+            d01,
+            diff2
+        );
+    }
+
+    #[test]
+    fn hilbert_frame_encoding() {
+        let frame = ScreenFrame {
+            pixels: vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],
+            width: 4,
+            height: 4,
+            timestamp_ms: 0,
+        };
+
+        let encoder = HilbertEncoder::for_dimensions(4, 4);
+        let encoded = encoder.encode_frame(&frame);
+
+        // Encoded should have the right size
+        assert_eq!(encoded.len(), 16); // 4x4 = 16
+
+        // The values should be a permutation of the original
+        let mut sorted_original: Vec<u8> = frame.pixels.clone();
+        let mut sorted_encoded: Vec<u8> = encoded.clone();
+        sorted_original.sort();
+        sorted_encoded.sort();
+        assert_eq!(sorted_original, sorted_encoded);
+    }
+
+    #[test]
+    fn hilbert_frame_roundtrip() {
+        let frame = ScreenFrame {
+            pixels: (0..64u8).collect(), // 8x8 frame
+            width: 8,
+            height: 8,
+            timestamp_ms: 12345,
+        };
+
+        let encoder = HilbertEncoder::for_dimensions(8, 8);
+        let encoded = encoder.encode_frame(&frame);
+        let decoded = encoder.decode_to_frame(&encoded, 8, 8);
+
+        assert_eq!(decoded.width, 8);
+        assert_eq!(decoded.height, 8);
+        assert_eq!(decoded.pixels, frame.pixels);
+    }
+
+    #[test]
+    fn hilbert_frame_encoding_large() {
+        // Test with larger dimensions
+        let frame = ScreenFrame {
+            pixels: vec![128u8; 256 * 256],
+            width: 256,
+            height: 256,
+            timestamp_ms: 0,
+        };
+
+        let encoder = HilbertEncoder::for_dimensions(256, 256);
+        assert_eq!(encoder.order(), 8); // 2^8 = 256
+
+        let encoded = encoder.encode_frame(&frame);
+        assert_eq!(encoded.len(), 256 * 256);
+    }
+
+    #[test]
+    fn spatial_coherence_constant_frame() {
+        // A constant frame should have perfect coherence
+        let frame = ScreenFrame {
+            pixels: vec![128u8; 16],
+            width: 4,
+            height: 4,
+            timestamp_ms: 0,
+        };
+
+        let coherence = spatial_coherence_score(&frame);
+        assert!(
+            coherence > 0.99,
+            "Constant frame should have coherence ~1.0, got {}",
+            coherence
+        );
+    }
+
+    #[test]
+    fn spatial_coherence_checkerboard() {
+        // A checkerboard pattern should have lower coherence
+        let mut pixels = vec![0u8; 16];
+        for i in 0..4 {
+            for j in 0..4 {
+                if (i + j) % 2 == 0 {
+                    pixels[i * 4 + j] = 255;
+                }
+            }
+        }
+
+        let frame = ScreenFrame {
+            pixels,
+            width: 4,
+            height: 4,
+            timestamp_ms: 0,
+        };
+
+        let coherence = spatial_coherence_score(&frame);
+        // Checkerboard should have lower coherence than constant
+        assert!(coherence < 1.0, "Checkerboard should have coherence < 1.0");
+        assert!(coherence >= 0.0, "Coherence should be non-negative");
+    }
+
+    #[test]
+    fn encode_frame_hilbert_helper() {
+        let frame = ScreenFrame {
+            pixels: (0..16u8).collect(),
+            width: 4,
+            height: 4,
+            timestamp_ms: 0,
+        };
+
+        let encoded = encode_frame_hilbert(&frame);
+        assert_eq!(encoded.len(), 16);
+    }
+
+    #[test]
+    fn hilbert_order_zero() {
+        // Test edge case: order 0 (1x1 grid)
+        let encoder = HilbertEncoder::with_order(0);
+        assert_eq!(encoder.size(), 1);
+        assert_eq!(encoder.encode(0, 0), 0);
+        assert_eq!(encoder.decode(0), (0, 0));
+    }
+
+    #[test]
+    fn hilbert_clamping() {
+        // Test that coordinates are clamped to grid bounds
+        let encoder = HilbertEncoder::with_order(2); // 4x4 grid
+
+        // These should be clamped to (3, 3)
+        let d = encoder.encode(100, 100);
+        let (x, y) = encoder.decode(d);
+        assert!(x < 4);
+        assert!(y < 4);
     }
 }

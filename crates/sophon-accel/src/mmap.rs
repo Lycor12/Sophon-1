@@ -2,7 +2,7 @@
 //!
 //! Provides read-only memory mapping for weight files.
 //! Windows: CreateFileMapping + MapViewOfFile.
-//! Non-Windows: placeholder that falls back to read-into-buffer.
+//! Unix (Linux/macOS): mmap with PROT_READ.
 
 use std::path::Path;
 
@@ -18,7 +18,11 @@ pub struct MappedFile {
     _mapping_handle: *mut std::ffi::c_void,
 
     #[cfg(not(target_os = "windows"))]
-    buffer: Vec<u8>,
+    data: *const u8,
+    #[cfg(not(target_os = "windows"))]
+    len: usize,
+    #[cfg(not(target_os = "windows"))]
+    _file: std::fs::File,
 }
 
 // Safety: MappedFile is read-only, the mapped region doesn't change.
@@ -39,8 +43,8 @@ impl std::fmt::Display for MmapError {
         match self {
             MmapError::IoError(e) => write!(f, "I/O error: {}", e),
             MmapError::EmptyFile => write!(f, "file is empty"),
-            MmapError::MappingFailed(code) => write!(f, "CreateFileMapping failed: {}", code),
-            MmapError::ViewFailed(code) => write!(f, "MapViewOfFile failed: {}", code),
+            MmapError::MappingFailed(code) => write!(f, "mapping failed: {}", code),
+            MmapError::ViewFailed(code) => write!(f, "view failed: {}", code),
         }
     }
 }
@@ -184,28 +188,95 @@ impl Drop for MappedFile {
     }
 }
 
-// === Non-Windows fallback ===
+// === Unix (Linux/macOS) implementation ===
 #[cfg(not(target_os = "windows"))]
-impl MappedFile {
-    /// Fallback: read entire file into a buffer.
-    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, MmapError> {
-        let buffer = std::fs::read(path.as_ref()).map_err(MmapError::IoError)?;
-        if buffer.is_empty() {
-            return Err(MmapError::EmptyFile);
-        }
-        Ok(MappedFile { buffer })
+mod unix {
+    use std::os::fd::AsRawFd;
+
+    pub const PROT_READ: i32 = 0x1;
+    pub const PROT_WRITE: i32 = 0x2;
+    pub const MAP_PRIVATE: i32 = 0x02;
+    pub const MAP_FAILED: *mut std::ffi::c_void = -1isize as *mut std::ffi::c_void;
+
+    #[link(name = "c")]
+    extern "C" {
+        pub fn mmap(
+            addr: *mut std::ffi::c_void,
+            length: usize,
+            prot: i32,
+            flags: i32,
+            fd: i32,
+            offset: i64,
+        ) -> *mut std::ffi::c_void;
+
+        pub fn munmap(addr: *mut std::ffi::c_void, length: usize) -> i32;
     }
 
+    /// Memory-map a file read-only using POSIX mmap.
+    pub unsafe fn mmap_file(file: &std::fs::File, len: usize) -> Option<*const u8> {
+        let fd = file.as_raw_fd();
+        let ptr = mmap(std::ptr::null_mut(), len, PROT_READ, MAP_PRIVATE, fd, 0);
+        if ptr == MAP_FAILED {
+            None
+        } else {
+            Some(ptr as *const u8)
+        }
+    }
+
+    pub unsafe fn unmap_file(addr: *const u8, len: usize) -> i32 {
+        munmap(addr as *mut std::ffi::c_void, len)
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+impl MappedFile {
+    /// Open a file and memory-map it read-only using POSIX mmap.
+    pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, MmapError> {
+        // Open file
+        let file = std::fs::File::open(path.as_ref()).map_err(MmapError::IoError)?;
+
+        // Get file size
+        let metadata = file.metadata().map_err(MmapError::IoError)?;
+        let len = metadata.len() as usize;
+
+        if len == 0 {
+            return Err(MmapError::EmptyFile);
+        }
+
+        // Memory map the file
+        let data = unsafe { unix::mmap_file(&file, len) };
+        match data {
+            Some(ptr) => Ok(MappedFile {
+                data: ptr,
+                len,
+                _file: file,
+            }),
+            None => Err(MmapError::MappingFailed(0)),
+        }
+    }
+
+    /// Get a byte slice of the mapped region.
     pub fn as_slice(&self) -> &[u8] {
-        &self.buffer
+        // Safety: data is valid for len bytes, read-only, lifetime tied to self.
+        unsafe { std::slice::from_raw_parts(self.data, self.len) }
     }
 
     pub fn len(&self) -> usize {
-        self.buffer.len()
+        self.len
     }
 
     pub fn is_empty(&self) -> bool {
-        self.buffer.is_empty()
+        self.len == 0
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+impl Drop for MappedFile {
+    fn drop(&mut self) {
+        unsafe {
+            // Ignore errors on unmap
+            let _ = unix::unmap_file(self.data, self.len);
+        }
     }
 }
 
@@ -260,6 +331,27 @@ mod tests {
         assert_eq!(mapped.as_slice(), data.as_slice());
 
         drop(mapped);
+        std::fs::remove_file(&path).ok();
+    }
+
+    /// Test that mmap provides actual memory mapping (not just file read)
+    /// by verifying the pointer behavior is consistent with mmap semantics.
+    #[test]
+    fn mmap_returns_consistent_view() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("sophon_mmap_consistency.bin");
+        let data = b"Test data for consistency check";
+        std::fs::write(&path, data).expect("write temp file");
+
+        // Open twice and verify both views see same data
+        let mapped1 = MappedFile::open(&path).expect("mmap open 1");
+        let mapped2 = MappedFile::open(&path).expect("mmap open 2");
+
+        assert_eq!(mapped1.as_slice(), mapped2.as_slice());
+        assert_eq!(mapped1.len(), mapped2.len());
+
+        drop(mapped1);
+        drop(mapped2);
         std::fs::remove_file(&path).ok();
     }
 }

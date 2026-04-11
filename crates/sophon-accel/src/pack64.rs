@@ -11,8 +11,30 @@
 const WEIGHTS_PER_U64: usize = 32;
 
 /// Pack up to 32 ternary i8 values into a single u64.
+///
 /// Values beyond `vals.len()` are treated as 0.
 /// Encoding: -1 -> 0b10, 0 -> 0b00, +1 -> 0b01.
+///
+/// # Examples
+///
+/// ```
+/// use sophon_accel::pack64::pack_32_ternary;
+///
+/// // Pack 32 ternary values
+/// let vals: Vec<i8> = vec![
+///     1, -1, 0, 1, -1, 0, 1, -1,
+///     0, 1, -1, 0, 1, -1, 0, 1,
+///     -1, 0, 1, -1, 0, 1, -1, 0,
+///     1, -1, 0, 1, -1, 0, 1, -1,
+/// ];
+/// let packed = pack_32_ternary(&vals);
+/// assert_ne!(packed, 0); // Packed representation is non-zero
+///
+/// // Partial packing (only 5 values)
+/// let partial = vec![1i8, -1, 0, 1, -1];
+/// let packed_partial = pack_32_ternary(&partial);
+/// // The remaining 27 values are treated as 0
+/// ```
 pub fn pack_32_ternary(vals: &[i8]) -> u64 {
     let n = vals.len().min(WEIGHTS_PER_U64);
     let mut packed: u64 = 0;
@@ -28,7 +50,34 @@ pub fn pack_32_ternary(vals: &[i8]) -> u64 {
 }
 
 /// Unpack a u64 into up to 32 ternary i8 values.
+///
 /// `count` specifies how many to extract (max 32).
+///
+/// # Examples
+///
+/// ```
+/// use sophon_accel::pack64::{pack_32_ternary, unpack_32_ternary};
+///
+/// // Roundtrip: pack then unpack
+/// let original: Vec<i8> = vec![1, -1, 0, 1, -1];
+/// let packed = pack_32_ternary(&original);
+/// let unpacked = unpack_32_ternary(packed, 5);
+/// assert_eq!(original, unpacked);
+///
+/// // Unpack full 32 values
+/// let vals: Vec<i8> = (0..32).map(|i| match i % 3 {
+///     0 => -1,
+///     1 => 0,
+///     _ => 1,
+/// }).collect();
+/// let packed = pack_32_ternary(&vals);
+/// let unpacked = unpack_32_ternary(packed, 32);
+/// assert_eq!(vals, unpacked);
+///
+/// // Extract partial count
+/// let partial = unpack_32_ternary(packed, 10);
+/// assert_eq!(partial.len(), 10);
+/// ```
 pub fn unpack_32_ternary(packed: u64, count: usize) -> Vec<i8> {
     let n = count.min(WEIGHTS_PER_U64);
     let mut out = Vec::with_capacity(n);

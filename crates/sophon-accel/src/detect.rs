@@ -9,9 +9,21 @@ use std::sync::atomic::{AtomicU8, Ordering};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum SimdLevel {
+    /// No SIMD support - scalar fallback using standard Rust operations.
+    /// This is the baseline implementation that works on all platforms.
     Scalar = 0,
+
+    /// SSE 4.2 support - 128-bit SIMD instructions.
+    /// Provides basic vectorized operations for x86/x86_64 processors.
     Sse42 = 1,
+
+    /// AVX2 support - 256-bit SIMD instructions.
+    /// Enables wider vector operations and fused multiply-add instructions.
     Avx2 = 2,
+
+    /// AVX-512 support - 512-bit SIMD instructions.
+    /// Maximum throughput with widest vector registers and additional mask registers.
+    /// Requires both AVX-512F and AVX-512BW feature flags.
     Avx512 = 3,
 }
 
@@ -84,6 +96,20 @@ fn detect_impl() -> SimdLevel {
     SimdLevel::Scalar
 }
 
+/// Execute the CPUID instruction to query processor capabilities.
+///
+/// # Safety
+///
+/// This function uses inline assembly to execute the CPUID instruction.
+/// It is only safe to call on x86_64 architectures where CPUID is supported.
+///
+/// The caller must ensure:
+/// - The code runs on x86_64 architecture
+/// - The processor supports the CPUID instruction (all modern x86_64 CPUs do)
+/// - The leaf and sub_leaf values are valid for the processor
+///
+/// CPUID may modify the EBX/RBX register, which is used by LLVM's internal
+/// stack canary on some platforms. This implementation preserves RBX.
 #[cfg(target_arch = "x86_64")]
 unsafe fn cpuid(leaf: u32, sub_leaf: u32) -> (u32, u32, u32, u32) {
     let (eax, ebx, ecx, edx): (u32, u32, u32, u32);
@@ -101,6 +127,20 @@ unsafe fn cpuid(leaf: u32, sub_leaf: u32) -> (u32, u32, u32, u32) {
     (eax, ebx, ecx, edx)
 }
 
+/// Execute the XGETBV instruction to read extended control register values.
+///
+/// # Safety
+///
+/// This function uses inline assembly to execute the XGETBV instruction.
+/// It is only safe to call on x86_64 architectures where XGETBV is supported.
+///
+/// The caller must ensure:
+/// - The code runs on x86_64 architecture
+/// - The OS supports extended state management (indicated by OSXSAVE CPUID bit)
+/// - The xcr parameter specifies a valid extended control register (typically 0 for XCR0)
+///
+/// XGETBV is used to verify that the OS has enabled AVX/AVX-512 registers
+/// for use by applications.
 #[cfg(target_arch = "x86_64")]
 unsafe fn xgetbv(xcr: u32) -> u64 {
     let (eax, edx): (u32, u32);

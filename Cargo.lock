@@ -68,6 +68,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "sophon-integration"
+version = "0.1.0"
+
+[[package]]
 name = "sophon-kan"
 version = "0.1.0"
 dependencies = [

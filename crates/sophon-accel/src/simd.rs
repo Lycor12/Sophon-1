@@ -19,11 +19,20 @@ use crate::pack64::unpack_32_ternary;
 ///
 /// `packed_rows`: each row is a Vec<u64> of packed ternary weights.
 /// `scales`: per-block scale factors (one per 64-weight block in original).
-///           For u64 packing, scales are per-32-weight group.
+/// For u64 packing, scales are per-32-weight group.
 /// `x`: input vector.
 /// `row_len`: number of columns (actual weight count per row).
 ///
 /// Returns: output vector of length `packed_rows.len()`.
+///
+/// # Panics
+///
+/// This function does not panic under normal operation. However, note that:
+/// - If `scales` is shorter than required for the number of weight blocks,
+///   a scale factor of 1.0 is used as fallback (does not panic)
+/// - The function assumes `packed_rows` and `scales` have corresponding lengths
+///   per row; mismatched lengths may produce incorrect results
+/// - Invalid ternary encodings in `packed_rows` (value 0b11) are treated as 0
 pub fn ternary_matvec(
     packed_rows: &[Vec<u64>],
     scales: &[Vec<f32>],

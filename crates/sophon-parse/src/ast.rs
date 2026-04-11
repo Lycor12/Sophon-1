@@ -312,28 +312,75 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Create a new parser from a vector of tokens.
+    ///
+    /// The parser takes ownership of the tokens and starts at position 0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sophon_parse::lexer::{lex_c, Token};
+    /// use sophon_parse::ast::Parser;
+    ///
+    /// let source = "int x = 42;";
+    /// let tokens = lex_c(source).unwrap();
+    /// let parser = Parser::new(tokens);
+    /// ```
     pub fn new(tokens: Vec<Token>) -> Self {
         Self { tokens, pos: 0 }
     }
 
+    /// Get a reference to the token at the current position.
+    ///
+    /// If the current position is past the end of the token stream,
+    /// returns the last token (typically EOF).
+    ///
+    /// # Returns
+    ///
+    /// A reference to the current token.
     fn current(&self) -> &Token {
         self.tokens
             .get(self.pos)
             .unwrap_or(&self.tokens[self.tokens.len() - 1])
     }
 
+    /// Look ahead in the token stream without advancing.
+    ///
+    /// # Arguments
+    ///
+    /// * `offset` - The number of positions to look ahead (0 = current)
+    ///
+    /// # Returns
+    ///
+    /// A reference to the token at `pos + offset`, or the last token
+    /// if the offset goes past the end of the stream.
     fn peek(&self, offset: usize) -> &Token {
         self.tokens
             .get(self.pos + offset)
             .unwrap_or(&self.tokens[self.tokens.len() - 1])
     }
 
+    /// Advance the parser position by one token.
+    ///
+    /// Does nothing if already at the end of the token stream.
     fn advance(&mut self) {
         if self.pos < self.tokens.len() - 1 {
             self.pos += 1;
         }
     }
 
+    /// Expect a specific token kind at the current position.
+    ///
+    /// If the current token matches the expected kind, consumes it and
+    /// returns a clone of the token. Otherwise, returns a parse error.
+    ///
+    /// # Arguments
+    ///
+    /// * `kind` - The expected token kind
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Token)` if the token matches, `Err(ParseError)` otherwise.
     fn expect(&mut self, kind: TokenKind) -> Result<Token, ParseError> {
         if self.current().kind == kind {
             let token = self.current().clone();
@@ -348,14 +395,36 @@ impl Parser {
         }
     }
 
+    /// Check if the current token matches a specific kind.
+    ///
+    /// # Arguments
+    ///
+    /// * `kind` - The token kind to check against
+    ///
+    /// # Returns
+    ///
+    /// `true` if the current token's kind equals `kind`, `false` otherwise.
     fn match_kind(&self, kind: TokenKind) -> bool {
         self.current().kind == kind
     }
 
+    /// Check if the current token matches any of the given kinds.
+    ///
+    /// # Arguments
+    ///
+    /// * `kinds` - A slice of token kinds to check against
+    ///
+    /// # Returns
+    ///
+    /// `true` if the current token's kind is in `kinds`, `false` otherwise.
     fn match_any(&self, kinds: &[TokenKind]) -> bool {
         kinds.iter().any(|k| self.match_kind(*k))
     }
 
+    /// Skip whitespace, newlines, and comments.
+    ///
+    /// Advances the parser past any tokens that are not significant
+    /// for parsing (whitespace, newlines, line comments, block comments).
     fn skip_whitespace_and_comments(&mut self) {
         while matches!(
             self.current().kind,
