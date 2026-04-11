@@ -49,20 +49,25 @@ mod renderer;
 mod style;
 mod terminal;
 
-pub use ansi::{AnsiBuffer, AnsiCode, style_to_ansi, RESET};
+pub use ansi::{style_to_ansi, AnsiBuffer, AnsiCode, RESET};
 pub use component::{Component, ComponentId, ComponentRegistry, RenderContext};
-pub use effect::{Effect, EffectType, EffectQueue, Dependency};
-pub use element::{Element, Text, Box as BoxElement, Column, Row, Border, Button, Input};
-pub use hook::{use_state, use_ref, use_memo, Hooks, HookId};
-pub use input::{Event, KeyEvent, KeyCode, KeyModifiers, MouseEvent};
-pub use layout::{Layout, Rect, Size, Constraint};
-pub use render::{render_to_string, RenderBuffer};
-pub use renderer::{Renderer, RenderMode};
-pub use style::{BorderStyle, Color, Style, TextStyle};
-pub use terminal::{Terminal, TerminalBuffer, TerminalSize, Capabilities};
+pub use effect::{Dependency, Effect, EffectQueue, EffectType};
+pub use element::{Element, ElementId, ElementKind};
+pub use hook::{HookId, HookState, Hooks};
+pub use input::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+pub use layout::{Constraint, Layout, Rect, Size};
+pub use render::{render_element, render_to_string, RenderBuffer};
+pub use renderer::{RenderMode, Renderer};
+pub use style::{BorderStyle, Color, Style, TextWrap};
+pub use terminal::{Capabilities, Terminal, TerminalBuffer};
 
-/// Component macro - marks a function as a TUI component
-pub use sophon_tui_macros::component;
+/// Re-export commonly used functions
+pub mod prelude {
+    pub use crate::element::Element;
+    pub use crate::layout::{Constraint, Rect};
+    pub use crate::render::render_to_string;
+    pub use crate::style::{BorderStyle, Color, Style};
+}
 
 /// Current TUI version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -83,20 +88,14 @@ mod tests {
 
     #[test]
     fn element_tree_building() {
-        let tree = Element::column(vec![
-            Element::text("Hello"),
-            Element::text("World"),
-        ]);
+        let tree = Element::column(vec![Element::text("Hello"), Element::text("World")]);
 
         assert!(matches!(tree.kind, ElementKind::Column));
     }
 
     #[test]
     fn style_chaining() {
-        let styled = Element::text("test")
-            .color(Color::Red)
-            .bold()
-            .underline();
+        let styled = Element::text("test").color(Color::Red).bold().underline();
 
         assert_eq!(styled.style.fg, Some(Color::Red));
         assert!(styled.style.bold);

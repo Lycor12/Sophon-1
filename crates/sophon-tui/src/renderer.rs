@@ -94,6 +94,11 @@ impl Renderer {
         Ok(())
     }
 
+    /// Get current size
+    pub fn get_size(&self) -> (u16, u16) {
+        (self.buffer.width, self.buffer.height)
+    }
+
     /// Render an element
     pub fn render(&mut self, element: &Element) -> std::io::Result<()> {
         // Clear buffer

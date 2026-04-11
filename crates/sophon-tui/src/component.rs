@@ -119,13 +119,13 @@ macro_rules! component {
 
 /// Component props trait - derive for type-safe props
 pub trait Props: Clone + std::fmt::Debug + 'static {
-    /// Compare props for equality
-    fn eq(&self, other: &dyn Props) -> bool;
+    /// Compare props for equality using Any
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 impl Props for () {
-    fn eq(&self, _other: &dyn Props) -> bool {
-        true
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

@@ -94,7 +94,7 @@ impl Element {
     }
 
     /// Create a bordered container
-    pub fn border(child: Element, style: BorderStyle) -> Self {
+    pub fn bordered(child: Element, style: BorderStyle) -> Self {
         Element {
             id: None,
             kind: ElementKind::Border(style),

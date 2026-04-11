@@ -9,8 +9,7 @@ use std::cell::RefCell;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HookId(pub usize);
 
-/// Hook state storage
-#[derive(Debug)]
+/// Hook state storage (manual Debug because of Fn trait objects)
 pub enum HookState {
     /// use_state: (value, setter)
     State(Box<dyn std::any::Any>),
@@ -26,6 +25,24 @@ pub enum HookState {
         callback: Box<dyn Fn()>,
         cleanup: Option<Box<dyn Fn()>>,
     },
+}
+
+impl std::fmt::Debug for HookState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HookState::State(_) => f.debug_struct("State").field("type", &"Any").finish(),
+            HookState::Ref(_) => f.debug_struct("Ref").field("type", &"Any").finish(),
+            HookState::Memo { .. } => f.debug_struct("Memo").finish(),
+            HookState::Effect {
+                callback: _,
+                cleanup,
+            } => f
+                .debug_struct("Effect")
+                .field("has_callback", &true)
+                .field("has_cleanup", &cleanup.is_some())
+                .finish(),
+        }
+    }
 }
 
 /// Collection of hooks for a component

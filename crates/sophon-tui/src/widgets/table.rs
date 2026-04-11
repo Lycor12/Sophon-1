@@ -2,7 +2,7 @@
 
 use crate::element::Element;
 use crate::layout::{Constraint, Rect, Size};
-use crate::style::{BorderStyle, Color, Style, TextStyle};
+use crate::style::{BorderStyle, Color, Style};
 use crate::widgets::Widget;
 
 /// Table column definition
@@ -99,13 +99,10 @@ impl Table {
         Table {
             columns,
             rows: Vec::new(),
-            header_style: Style::default()
-                .fg(Color::White)
-                .bg(Color::DarkGrey)
-                .text_style(TextStyle::Bold),
+            header_style: Style::default().fg(Color::White).bg(Color::DarkGrey).bold(),
             row_style: Style::default(),
             alt_row_style: Some(Style::default().bg(Color::Rgb(40, 40, 40))),
-            border: BorderStyle::Plain,
+            border: BorderStyle::Single,
             separator: " │ ".to_string(),
         }
     }

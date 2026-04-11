@@ -3,22 +3,38 @@
 /// ANSI colors supported by the terminal
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Color {
+    /// Black color
     Black,
+    /// Red color
     Red,
+    /// Green color
     Green,
+    /// Yellow color
     Yellow,
+    /// Blue color
     Blue,
+    /// Magenta color
     Magenta,
+    /// Cyan color
     Cyan,
+    /// White color
     White,
-    BrightBlack,
-    BrightRed,
-    BrightGreen,
-    BrightYellow,
-    BrightBlue,
-    BrightMagenta,
-    BrightCyan,
-    BrightWhite,
+    /// Dark grey / Bright black
+    DarkGrey,
+    /// Light red
+    LightRed,
+    /// Light green
+    LightGreen,
+    /// Light yellow
+    LightYellow,
+    /// Light blue
+    LightBlue,
+    /// Light magenta
+    LightMagenta,
+    /// Light cyan
+    LightCyan,
+    /// Light grey / Bright white
+    LightGrey,
     /// RGB color (r, g, b)
     Rgb(u8, u8, u8),
     /// ANSI 256 color index
@@ -37,14 +53,14 @@ impl Color {
             Color::Magenta => "\x1b[35m".to_string(),
             Color::Cyan => "\x1b[36m".to_string(),
             Color::White => "\x1b[37m".to_string(),
-            Color::BrightBlack => "\x1b[90m".to_string(),
-            Color::BrightRed => "\x1b[91m".to_string(),
-            Color::BrightGreen => "\x1b[92m".to_string(),
-            Color::BrightYellow => "\x1b[93m".to_string(),
-            Color::BrightBlue => "\x1b[94m".to_string(),
-            Color::BrightMagenta => "\x1b[95m".to_string(),
-            Color::BrightCyan => "\x1b[96m".to_string(),
-            Color::BrightWhite => "\x1b[97m".to_string(),
+            Color::DarkGrey => "\x1b[90m".to_string(),
+            Color::LightRed => "\x1b[91m".to_string(),
+            Color::LightGreen => "\x1b[92m".to_string(),
+            Color::LightYellow => "\x1b[93m".to_string(),
+            Color::LightBlue => "\x1b[94m".to_string(),
+            Color::LightMagenta => "\x1b[95m".to_string(),
+            Color::LightCyan => "\x1b[96m".to_string(),
+            Color::LightGrey => "\x1b[97m".to_string(),
             Color::Rgb(r, g, b) => format!("\x1b[38;2;{};{};{}m", r, g, b),
             Color::Ansi256(n) => format!("\x1b[38;5;{}m", n),
         }
@@ -60,14 +76,14 @@ impl Color {
             Color::Magenta => "\x1b[45m".to_string(),
             Color::Cyan => "\x1b[46m".to_string(),
             Color::White => "\x1b[47m".to_string(),
-            Color::BrightBlack => "\x1b[100m".to_string(),
-            Color::BrightRed => "\x1b[101m".to_string(),
-            Color::BrightGreen => "\x1b[102m".to_string(),
-            Color::BrightYellow => "\x1b[103m".to_string(),
-            Color::BrightBlue => "\x1b[104m".to_string(),
-            Color::BrightMagenta => "\x1b[105m".to_string(),
-            Color::BrightCyan => "\x1b[106m".to_string(),
-            Color::BrightWhite => "\x1b[107m".to_string(),
+            Color::DarkGrey => "\x1b[100m".to_string(),
+            Color::LightRed => "\x1b[101m".to_string(),
+            Color::LightGreen => "\x1b[102m".to_string(),
+            Color::LightYellow => "\x1b[103m".to_string(),
+            Color::LightBlue => "\x1b[104m".to_string(),
+            Color::LightMagenta => "\x1b[105m".to_string(),
+            Color::LightCyan => "\x1b[106m".to_string(),
+            Color::LightGrey => "\x1b[107m".to_string(),
             Color::Rgb(r, g, b) => format!("\x1b[48;2;{};{};{}m", r, g, b),
             Color::Ansi256(n) => format!("\x1b[48;5;{}m", n),
         }
@@ -119,6 +135,34 @@ impl BorderStyle {
             BorderStyle::Dashed => ["┌", "╌", "┐", "┊", "┘", "╌", "└", "┊"],
             BorderStyle::Dotted => ["┌", "┈", "┐", "┆", "┘", "┈", "└", "┆"],
             BorderStyle::Rounded => ["╭", "─", "╮", "│", "╯", "─", "╰", "│"],
+        }
+    }
+}
+
+/// Text style flags (bold, italic, etc.)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TextStyle {
+    pub bold: bool,
+    pub dim: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub blink: bool,
+    pub reverse: bool,
+    pub hidden: bool,
+    pub strikethrough: bool,
+}
+
+impl TextStyle {
+    pub fn bold() -> Self {
+        TextStyle {
+            bold: true,
+            ..Default::default()
+        }
+    }
+    pub fn italic() -> Self {
+        TextStyle {
+            italic: true,
+            ..Default::default()
         }
     }
 }
@@ -204,6 +248,48 @@ impl Style {
             hidden: other.hidden || self.hidden,
             strikethrough: other.strikethrough || self.strikethrough,
         }
+    }
+
+    // Builder methods
+    pub fn fg(mut self, color: Color) -> Self {
+        self.fg = Some(color);
+        self
+    }
+    pub fn bg(mut self, color: Color) -> Self {
+        self.bg = Some(color);
+        self
+    }
+    pub fn bold(mut self) -> Self {
+        self.bold = true;
+        self
+    }
+    pub fn dim(mut self) -> Self {
+        self.dim = true;
+        self
+    }
+    pub fn italic(mut self) -> Self {
+        self.italic = true;
+        self
+    }
+    pub fn underline(mut self) -> Self {
+        self.underline = true;
+        self
+    }
+    pub fn blink(mut self) -> Self {
+        self.blink = true;
+        self
+    }
+    pub fn reverse(mut self) -> Self {
+        self.reverse = true;
+        self
+    }
+    pub fn hidden(mut self) -> Self {
+        self.hidden = true;
+        self
+    }
+    pub fn strikethrough(mut self) -> Self {
+        self.strikethrough = true;
+        self
     }
 }
 

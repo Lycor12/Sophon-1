@@ -45,8 +45,7 @@ pub type EffectCallback = Box<dyn FnMut() + 'static>;
 /// Effect cleanup type
 pub type EffectCleanup = Box<dyn FnOnce() + 'static>;
 
-/// Effect entry
-#[derive(Debug)]
+/// Effect entry (manual Debug impl because EffectCallback doesn't implement Debug)
 pub struct Effect {
     /// Effect type
     pub effect_type: EffectType,
@@ -56,6 +55,17 @@ pub struct Effect {
     pub has_run: bool,
     /// Cleanup function (set when effect runs)
     pub cleanup: Option<EffectCleanup>,
+}
+
+impl std::fmt::Debug for Effect {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Effect")
+            .field("effect_type", &self.effect_type)
+            .field("last_deps", &self.last_deps)
+            .field("has_run", &self.has_run)
+            .field("cleanup", &self.cleanup.is_some())
+            .finish()
+    }
 }
 
 impl Effect {

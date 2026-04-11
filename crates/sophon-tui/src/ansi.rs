@@ -1,5 +1,7 @@
 //! ANSI escape sequence handling
 
+use crate::style::Color;
+
 /// ANSI escape codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnsiCode {
@@ -96,206 +98,309 @@ impl ColorCode {
     }
 }
 
-impl AnsiCode {
-    /// Convert to ANSI escape sequence string
-    pub fn to_string(&self) -> String {
-        match self {
-            AnsiCode::Reset => "\x1b[0m".to_string(),
-            AnsiCode::Bold => "\x1b[1m".to_string(),
-            AnsiCode::Dim => "\x1b[2m".to_string(),
-            AnsiCode::Italic => "\x1b[3m".to_string(),
-            AnsiCode::Underline => "\x1b[4m".to_string(),
-            AnsiCode::Blink => "\x1b[5m".to_string(),
-            AnsiCode::Reverse => "\x1b[7m".to_string(),
-            AnsiCode::Hidden => "\x1b[8m".to_string(),
-            AnsiCode::Strikethrough => "\x1b[9m".to_string(),
-            AnsiCode::Foreground(c) => format!("\x1b[{}m", c.fg_code()),
-            AnsiCode::Background(c) => format!("\x1b[{}m", c.bg_code()),
-            AnsiCode::CursorUp(n) => format!("\x1b[{}A", n),
-            AnsiCode::CursorDown(n) => format!("\x1b[{}B", n),
-            AnsiCode::CursorForward(n) => format!("\x1b[{}C", n),
-            AnsiCode::CursorBack(n) => format!("\x1b[{}D", n),
-            AnsiCode::CursorPos(row, col) => format!("\x1b[{};{}H", row, col),
-            AnsiCode::ClearScreen => "\x1b[2J\x1b[H".to_string(),
-            AnsiCode::ClearLine => "\x1b[2K".to_string(),
+impl From<Color> for ColorCode {
+    fn from(color: Color) -> Self {
+        match color {
+            Color::Black => ColorCode::Black,
+            Color::Red => ColorCode::Red,
+            Color::Green => ColorCode::Green,
+            Color::Yellow => ColorCode::Yellow,
+            Color::Blue => ColorCode::Blue,
+            Color::Magenta => ColorCode::Magenta,
+            Color::Cyan => ColorCode::Cyan,
+            Color::White => ColorCode::White,
+            Color::DarkGrey => ColorCode::BrightBlack,
+            Color::LightRed => ColorCode::BrightRed,
+            Color::LightGreen => ColorCode::BrightGreen,
+            Color::LightYellow => ColorCode::BrightYellow,
+            Color::LightBlue => ColorCode::BrightBlue,
+            Color::LightMagenta => ColorCode::BrightMagenta,
+            Color::LightCyan => ColorCode::BrightCyan,
+            Color::LightGrey => ColorCode::BrightWhite,
+            Color::Rgb(r, g, b) => ColorCode::Rgb(r, g, b),
+            Color::Ansi256(n) => ColorCode::Ansi256(n),
         }
     }
 }
 
-/// Buffered ANSI output
-#[derive(Debug, Default)]
+/// ANSI reset code
+pub const RESET: &str = "\x1b[0m";
+
+/// Buffer for building ANSI strings
+#[derive(Debug, Clone, Default)]
 pub struct AnsiBuffer {
-    content: String,
+    codes: Vec<String>,
 }
 
 impl AnsiBuffer {
-    /// Create new empty buffer
+    /// Create a new empty buffer
     pub fn new() -> Self {
-        AnsiBuffer {
-            content: String::new(),
+        AnsiBuffer { codes: Vec::new() }
+    }
+
+    /// Add a code
+    pub fn push(&mut self, code: impl Into<String>) {
+        self.codes.push(code.into());
+    }
+
+    /// Add foreground color
+    pub fn fg(&mut self, color: ColorCode) {
+        self.codes.push(color.fg_code());
+    }
+
+    /// Add background color
+    pub fn bg(&mut self, color: ColorCode) {
+        self.codes.push(color.bg_code());
+    }
+
+    /// Add bold
+    pub fn bold(&mut self) {
+        self.codes.push("1".to_string());
+    }
+
+    /// Add dim
+    pub fn dim(&mut self) {
+        self.codes.push("2".to_string());
+    }
+
+    /// Add italic
+    pub fn italic(&mut self) {
+        self.codes.push("3".to_string());
+    }
+
+    /// Add underline
+    pub fn underline(&mut self) {
+        self.codes.push("4".to_string());
+    }
+
+    /// Add blink
+    pub fn blink(&mut self) {
+        self.codes.push("5".to_string());
+    }
+
+    /// Add reverse
+    pub fn reverse(&mut self) {
+        self.codes.push("7".to_string());
+    }
+
+    /// Add hidden
+    pub fn hidden(&mut self) {
+        self.codes.push("8".to_string());
+    }
+
+    /// Add strikethrough
+    pub fn strikethrough(&mut self) {
+        self.codes.push("9".to_string());
+    }
+
+    /// Build the ANSI escape sequence
+    pub fn build(&self) -> String {
+        if self.codes.is_empty() {
+            String::new()
+        } else {
+            format!("\x1b[{}m", self.codes.join(";"))
         }
     }
 
-    /// Add ANSI code to buffer
-    pub fn push(&mut self, code: AnsiCode) {
-        self.content.push_str(&code.to_string());
-    }
-
-    /// Add raw string to buffer
-    pub fn push_str(&mut self, s: &str) {
-        self.content.push_str(s);
-    }
-
-    /// Add character to buffer
-    pub fn push_char(&mut self, c: char) {
-        self.content.push(c);
-    }
-
-    /// Move cursor to position
-    pub fn move_to(&mut self, row: u16, col: u16) {
-        self.push(AnsiCode::CursorPos(row, col));
-    }
-
-    /// Clear the buffer
+    /// Clear all codes
     pub fn clear(&mut self) {
-        self.content.clear();
-    }
-
-    /// Get buffer content
-    pub fn content(&self) -> &str {
-        &self.content
-    }
-
-    /// Take buffer content (clears buffer)
-    pub fn take(&mut self) -> String {
-        std::mem::take(&mut self.content)
-    }
-
-    /// Write buffer to output
-    pub fn flush(&mut self, output: &mut dyn std::io::Write) -> std::io::Result<()> {
-        output.write_all(self.content.as_bytes())?;
-        output.flush()?;
-        self.content.clear();
-        Ok(())
+        self.codes.clear();
     }
 }
 
-/// Detect terminal capabilities
-pub struct TerminalCapabilities;
+/// Cursor control
+pub struct Cursor;
 
-impl TerminalCapabilities {
-    /// Check if terminal supports true color
-    pub fn supports_truecolor() -> bool {
-        std::env::var("COLORTERM")
-            .map(|v| v == "truecolor" || v == "24bit")
-            .unwrap_or(false)
+impl Cursor {
+    /// Move cursor up
+    pub fn up(n: u16) -> String {
+        format!("\x1b[{}A", n)
     }
 
-    /// Check if terminal supports 256 colors
-    pub fn supports_256color() -> bool {
-        std::env::var("TERM")
-            .map(|v| v.contains("256color"))
-            .unwrap_or(false)
+    /// Move cursor down
+    pub fn down(n: u16) -> String {
+        format!("\x1b[{}B", n)
     }
 
-    /// Get terminal width
-    pub fn width() -> Option<u16> {
-        terminal_size().map(|(w, _)| w)
+    /// Move cursor forward
+    pub fn forward(n: u16) -> String {
+        format!("\x1b[{}C", n)
     }
 
-    /// Get terminal height
-    pub fn height() -> Option<u16> {
-        terminal_size().map(|(_, h)| h)
+    /// Move cursor back
+    pub fn back(n: u16) -> String {
+        format!("\x1b[{}D", n)
+    }
+
+    /// Move cursor to position (1-indexed)
+    pub fn goto(row: u16, col: u16) -> String {
+        format!("\x1b[{};{}H", row, col)
+    }
+
+    /// Save cursor position
+    pub fn save() -> &'static str {
+        "\x1b7"
+    }
+
+    /// Restore cursor position
+    pub fn restore() -> &'static str {
+        "\x1b8"
+    }
+
+    /// Hide cursor
+    pub fn hide() -> &'static str {
+        "\x1b[?25l"
+    }
+
+    /// Show cursor
+    pub fn show() -> &'static str {
+        "\x1b[?25h"
     }
 }
 
-/// Get terminal size using standard escape sequences
-#[cfg(unix)]
-pub fn terminal_size() -> Option<(u16, u16)> {
-    // On Unix, use ioctl
-    None // Placeholder - would need libc::ioctl
-}
+/// Screen control
+pub struct Screen;
 
-#[cfg(windows)]
-pub fn terminal_size() -> Option<(u16, u16)> {
-    // On Windows, use GetConsoleScreenBufferInfo
-    None // Placeholder - would need Win32 API
-}
+impl Screen {
+    /// Clear entire screen
+    pub fn clear() -> &'static str {
+        "\x1b[2J"
+    }
 
-/// ANSI reset sequence
-pub const RESET: &str = "\x1b[0m";
+    /// Clear from cursor to end of screen
+    pub fn clear_from_cursor() -> &'static str {
+        "\x1b[0J"
+    }
+
+    /// Clear from cursor to beginning of screen
+    pub fn clear_to_cursor() -> &'static str {
+        "\x1b[1J"
+    }
+
+    /// Clear current line
+    pub fn clear_line() -> &'static str {
+        "\x1b[2K"
+    }
+
+    /// Clear from cursor to end of line
+    pub fn clear_line_from_cursor() -> &'static str {
+        "\x1b[0K"
+    }
+
+    /// Clear from cursor to beginning of line
+    pub fn clear_line_to_cursor() -> &'static str {
+        "\x1b[1K"
+    }
+
+    /// Set scroll region
+    pub fn set_scroll_region(top: u16, bottom: u16) -> String {
+        format!("\x1b[{};{}r", top, bottom)
+    }
+
+    /// Reset scroll region
+    pub fn reset_scroll_region() -> &'static str {
+        "\x1b[r"
+    }
+
+    /// Enable mouse support
+    pub fn enable_mouse() -> &'static str {
+        "\x1b[?1000h\x1b[?1002h\x1b[?1015h\x1b[?1006h"
+    }
+
+    /// Disable mouse support
+    pub fn disable_mouse() -> &'static str {
+        "\x1b[?1006l\x1b[?1015l\x1b[?1002l\x1b[?1000l"
+    }
+
+    /// Enable alternate screen buffer
+    pub fn enter_alt_screen() -> &'static str {
+        "\x1b[?1049h"
+    }
+
+    /// Disable alternate screen buffer
+    pub fn exit_alt_screen() -> &'static str {
+        "\x1b[?1049l"
+    }
+}
 
 /// Convert a Style to ANSI escape sequences
-/// Returns only the changes needed from the previous style
 pub fn style_to_ansi(style: &crate::style::Style, prev: &crate::style::Style) -> String {
-    use crate::style::Color;
-
     let mut codes = Vec::new();
 
-    // Reset if needed
+    // Check if we need a full reset
     if style.fg != prev.fg || style.bg != prev.bg {
         codes.push("0".to_string());
 
-        // Re-apply text styles after reset
-        if style.text_style.bold {
+        // Re-apply all text styles after reset
+        if style.bold {
             codes.push("1".to_string());
         }
-        if style.text_style.dim {
+        if style.dim {
             codes.push("2".to_string());
         }
-        if style.text_style.italic {
+        if style.italic {
             codes.push("3".to_string());
         }
-        if style.text_style.underline {
+        if style.underline {
             codes.push("4".to_string());
         }
-        if style.text_style.blink {
+        if style.blink {
             codes.push("5".to_string());
         }
-        if style.text_style.reverse {
+        if style.reverse {
             codes.push("7".to_string());
         }
-        if style.text_style.hidden {
+        if style.hidden {
             codes.push("8".to_string());
         }
-        if style.text_style.strikethrough {
+        if style.strikethrough {
             codes.push("9".to_string());
         }
 
-        // Foreground
+        // Colors
         if let Some(fg) = style.fg {
             codes.push(color_to_fg_code(&fg));
         }
-
-        // Background
         if let Some(bg) = style.bg {
             codes.push(color_to_bg_code(&bg));
         }
     } else {
-        // Text style changes only
-        if style.text_style.bold != prev.text_style.bold {
-            codes.push(if style.text_style.bold { "1" } else { "22" }.to_string());
+        // Just text style changes
+        if style.bold != prev.bold {
+            codes.push(if style.bold { "1" } else { "22" }.to_string());
         }
-        if style.text_style.dim != prev.text_style.dim {
-            codes.push(if style.text_style.dim { "2" } else { "22" }.to_string());
+        if style.dim != prev.dim {
+            codes.push(if style.dim { "2" } else { "22" }.to_string());
         }
-        if style.text_style.italic != prev.text_style.italic {
-            codes.push(if style.text_style.italic { "3" } else { "23" }.to_string());
+        if style.italic != prev.italic {
+            codes.push(if style.italic { "3" } else { "23" }.to_string());
         }
-        if style.text_style.underline != prev.text_style.underline {
-            codes.push(if style.text_style.underline { "4" } else { "24" }.to_string());
+        if style.underline != prev.underline {
+            codes.push(if style.underline { "4" } else { "24" }.to_string());
         }
-        if style.text_style.blink != prev.text_style.blink {
-            codes.push(if style.text_style.blink { "5" } else { "25" }.to_string());
+        if style.blink != prev.blink {
+            codes.push(if style.blink { "5" } else { "25" }.to_string());
         }
-        if style.text_style.reverse != prev.text_style.reverse {
-            codes.push(if style.text_style.reverse { "7" } else { "27" }.to_string());
+        if style.reverse != prev.reverse {
+            codes.push(if style.reverse { "7" } else { "27" }.to_string());
         }
-        if style.text_style.hidden != prev.text_style.hidden {
-            codes.push(if style.text_style.hidden { "8" } else { "28" }.to_string());
+        if style.hidden != prev.hidden {
+            codes.push(if style.hidden { "8" } else { "28" }.to_string());
         }
-        if style.text_style.strikethrough != prev.text_style.strikethrough {
-            codes.push(if style.text_style.strikethrough { "9" } else { "29" }.to_string());
+        if style.strikethrough != prev.strikethrough {
+            codes.push(if style.strikethrough { "9" } else { "29" }.to_string());
+        }
+
+        // Color changes
+        if style.fg != prev.fg {
+            if let Some(fg) = style.fg {
+                codes.push(color_to_fg_code(&fg));
+            }
+        }
+        if style.bg != prev.bg {
+            if let Some(bg) = style.bg {
+                codes.push(color_to_bg_code(&bg));
+            }
         }
     }
 
@@ -325,6 +430,7 @@ fn color_to_fg_code(color: &Color) -> String {
         Color::LightCyan => "96".to_string(),
         Color::LightGrey => "97".to_string(),
         Color::Rgb(r, g, b) => format!("38;2;{};{};{}", r, g, b),
+        Color::Ansi256(n) => format!("38;5;{}", n),
     }
 }
 
@@ -347,6 +453,7 @@ fn color_to_bg_code(color: &Color) -> String {
         Color::LightCyan => "106".to_string(),
         Color::LightGrey => "107".to_string(),
         Color::Rgb(r, g, b) => format!("48;2;{};{};{}", r, g, b),
+        Color::Ansi256(n) => format!("48;5;{}", n),
     }
 }
 
@@ -355,25 +462,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ansi_code_strings() {
-        assert_eq!(AnsiCode::Reset.to_string(), "\x1b[0m");
-        assert_eq!(AnsiCode::Bold.to_string(), "\x1b[1m");
-        assert_eq!(AnsiCode::ClearScreen.to_string(), "\x1b[2J\x1b[H");
+    fn ansi_codes() {
+        assert_eq!(RESET, "\x1b[0m");
+        assert_eq!(Cursor::up(5), "\x1b[5A");
+        assert_eq!(Cursor::goto(10, 20), "\x1b[10;20H");
     }
 
     #[test]
     fn color_codes() {
-        assert_eq!(ColorCode::Red.fg_code(), "31");
-        assert_eq!(ColorCode::Rgb(255, 128, 0).fg_code(), "38;2;255;128;0");
+        let red = ColorCode::Red;
+        assert_eq!(red.fg_code(), "31");
+        assert_eq!(red.bg_code(), "41");
     }
 
     #[test]
     fn ansi_buffer() {
         let mut buf = AnsiBuffer::new();
-        buf.push(AnsiCode::Bold);
-        buf.push_str("Hello");
-        buf.push(AnsiCode::Reset);
-        assert_eq!(buf.content(), "\x1b[1mHello\x1b[0m");
+        buf.bold();
+        buf.fg(ColorCode::Red);
+        assert_eq!(buf.build(), "\x1b[1;31m");
     }
-}
 }

@@ -2,7 +2,7 @@
 
 use crate::element::Element;
 use crate::layout::{Constraint, Rect, Size};
-use crate::style::{Color, Style, TextStyle};
+use crate::style::{Color, Style};
 use crate::widgets::Widget;
 
 /// List widget configuration
@@ -34,10 +34,7 @@ impl List {
             selected: None,
             offset: 0,
             style: Style::default(),
-            selected_style: Style::default()
-                .fg(Color::Cyan)
-                .bg(Color::DarkGrey)
-                .text_style(TextStyle::Bold),
+            selected_style: Style::default().fg(Color::Cyan).bg(Color::DarkGrey).bold(),
             show_scrollbar: true,
             start_symbol: "> ".to_string(),
             end_symbol: String::new(),
