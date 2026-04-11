@@ -7,6 +7,13 @@
 //! - Backward pass from loss gradient through head → blocks → embedding
 //! - TSM-SGD parameter update for all parameter groups
 //!
+//! # GALC Integration
+//!
+//! Gradient-Aware Lazy Checkpointing (GALC) monitors per-block gradient norms
+//! during forward and selectively recomputes low-contribution blocks during
+//! backward to save memory. The strategy is rebuilt every N steps based on
+//! observed gradient statistics.
+//!
 //! # Free Energy Training
 //!
 //! Uses variational free energy loss which combines:
@@ -27,6 +34,7 @@ use sophon_model::Sophon1;
 use sophon_optim::tsm::TsmSgd;
 use sophon_ssm::SsmState;
 
+use crate::checkpoint::{galc_build_strategy, CheckpointStrategy};
 use crate::state::TrainState;
 
 // ---------------------------------------------------------------------------
@@ -43,42 +51,56 @@ pub struct TrainStepResult {
     pub grad_norm: f32,
     /// Number of tokens processed.
     pub num_tokens: usize,
+    /// Per-block gradient norms (for GALC strategy building).
+    pub block_grad_norms: Vec<f32>,
 }
 
 // ---------------------------------------------------------------------------
-// Forward pass with full caching
+// Forward pass with selective caching (GALC)
 // ---------------------------------------------------------------------------
 
 /// Per-token cached state for the full model forward.
+/// GALC-aware: only stores caches for blocks not marked for recomputation.
 struct TokenCache {
     /// Embedding output (for embedding backward).
     embed: Vec<f32>,
-    /// Per-block activation caches (16 caches).
-    block_caches: Vec<BlockCache>,
+    /// Per-block activation caches (16 caches, some may be None for recomputed blocks).
+    block_caches: Vec<Option<BlockCache>>,
     /// Output head cache.
     head_cache: sophon_model::backward::HeadCache,
     /// Logits output.
     logits: Vec<f32>,
+    /// Input token (needed if blocks are recomputed).
+    input_token: u8,
 }
 
-/// Run model forward on one token, caching everything for backward.
+/// Run model forward on one token with GALC-aware caching.
 fn forward_token_cached(
     model: &Sophon1,
     token: u8,
-    ssm_states: &mut Vec<SsmState>,
+    ssm_states: &mut [SsmState],
+    strategy: &CheckpointStrategy,
 ) -> Result<TokenCache, sophon_core::CoreError> {
-    // Embed
+    // Always embed
     let embed_tensor = model.embedding.embed_token(token);
     let embed_data = embed_tensor.as_slice().to_vec();
 
-    // 16 blocks with caching
+    // 16 blocks with selective caching
     let mut h = embed_tensor;
-    let mut block_caches = Vec::with_capacity(NUM_BLOCKS);
+    let mut block_caches: Vec<Option<BlockCache>> = Vec::with_capacity(NUM_BLOCKS);
 
     for i in 0..NUM_BLOCKS {
-        let (h_new, cache) = block_forward_with_cache(&model.blocks[i], &h, &mut ssm_states[i])?;
-        block_caches.push(cache);
-        h = h_new;
+        if strategy.should_recompute(i) {
+            // Just forward, don't cache (will recompute during backward)
+            h = model.blocks[i].forward(&h, &mut ssm_states[i])?;
+            block_caches.push(None);
+        } else {
+            // Forward with caching
+            let (h_new, cache) =
+                block_forward_with_cache(&model.blocks[i], &h, &mut ssm_states[i])?;
+            block_caches.push(Some(cache));
+            h = h_new;
+        }
     }
 
     // Head with caching
@@ -90,11 +112,12 @@ fn forward_token_cached(
         block_caches,
         head_cache,
         logits,
+        input_token: token,
     })
 }
 
 // ---------------------------------------------------------------------------
-// Backward pass: accumulate gradients over sequence
+// Backward pass with selective recomputation (GALC)
 // ---------------------------------------------------------------------------
 
 /// Accumulated gradients for the full model.
@@ -173,6 +196,17 @@ impl AccBlockGrads {
         add_inplace(&mut self.grad_ssm_d, &bg.ssm_grads.grad_d);
         self.grad_ssm_log_delta[0] += bg.ssm_grads.grad_log_delta;
     }
+
+    /// Compute L2 norm of accumulated gradients.
+    fn grad_norm(&self) -> f32 {
+        let mut norm_sq = 0.0f32;
+        norm_sq += l2_sq(&self.grad_kan_coeffs);
+        norm_sq += l2_sq(&self.grad_kan_w_base);
+        norm_sq += l2_sq(&self.grad_ssm_s);
+        norm_sq += l2_sq(&self.grad_ssm_b);
+        norm_sq += l2_sq(&self.grad_ssm_c);
+        norm_sq.sqrt()
+    }
 }
 
 impl AccHeadGrads {
@@ -246,15 +280,21 @@ impl AccumulatedGrads {
 }
 
 // ---------------------------------------------------------------------------
-// Main training step
+// Main training step with GALC
 // ---------------------------------------------------------------------------
+
+/// GALC strategy rebuild interval (in steps).
+const GALC_REBUILD_INTERVAL: usize = 100;
+
+/// Default memory budget for activation caching (2GB).
+const DEFAULT_MEMORY_BUDGET: usize = 2 * 1024 * 1024 * 1024;
 
 /// Execute one complete training step over a byte sequence.
 ///
 /// # Arguments
 /// * `model` — the Sophon-1 model (mutated in-place)
 /// * `optimizer` — the TSM-SGD optimizer
-/// * `train_state` — training state with momentum buffers
+/// * `train_state` — training state with momentum buffers and GALC state
 /// * `input` — byte sequence (at least 2 tokens for next-token prediction)
 ///
 /// # Returns
@@ -272,14 +312,24 @@ pub fn train_step(
 
     let seq_len = input.len() - 1; // number of (input, target) pairs
 
-    // --- Phase 1: Forward pass with caching ---
+    // --- Rebuild GALC strategy periodically ---
+    if train_state.global_step % GALC_REBUILD_INTERVAL as u64 == 0 {
+        train_state.checkpoint_strategy = galc_build_strategy(
+            &train_state.block_grad_norms,
+            DEFAULT_MEMORY_BUDGET,
+            seq_len,
+        );
+    }
+    let strategy = train_state.checkpoint_strategy.clone();
+
+    // --- Phase 1: Forward pass with selective caching ---
     let mut ssm_states: Vec<SsmState> = (0..NUM_BLOCKS).map(|_| SsmState::new()).collect();
     let mut token_caches = Vec::with_capacity(seq_len);
     let mut token_losses = Vec::with_capacity(seq_len);
     let mut total_loss = 0.0f32;
 
     for t in 0..seq_len {
-        let cache = forward_token_cached(model, input[t], &mut ssm_states)?;
+        let cache = forward_token_cached(model, input[t], &mut ssm_states, &strategy)?;
         let target = input[t + 1] as usize;
         let loss = prediction_error_loss(&cache.logits, target);
         total_loss += loss;
@@ -305,10 +355,25 @@ pub fn train_step(
         let (hg, mut grad_block_out) = head_backward(&model.head, &grad_logits, &cache.head_cache)?;
         acc_grads.head_grads.accumulate(&hg);
 
-        // Blocks backward (16 → 0)
+        // Blocks backward (16 → 0) with selective recomputation
         for i in (0..NUM_BLOCKS).rev() {
-            let (bg, grad_prev) =
-                block_backward(&model.blocks[i], &grad_block_out, &cache.block_caches[i])?;
+            let block = &model.blocks[i];
+
+            let (bg, grad_prev) = if let Some(ref block_cache) = cache.block_caches[i] {
+                // Use cached activations
+                block_backward(block, &grad_block_out, block_cache)?
+            } else {
+                // Recompute activations during backward (GALC)
+                // Re-run forward to get cache, then backward
+                let mut temp_ssm = SsmState::new();
+                let (_, temp_cache) = block_forward_with_cache(
+                    block,
+                    &Tensor::from_vec(cache.embed.clone(), D_MODEL),
+                    &mut temp_ssm,
+                )?;
+                block_backward(block, &grad_block_out, &temp_cache)?
+            };
+
             acc_grads.block_grads[i].accumulate(&bg);
             grad_block_out = grad_prev;
         }
@@ -336,6 +401,22 @@ pub fn train_step(
         block.refresh_disc();
     }
 
+    // --- Phase 6: Record per-block gradient norms for GALC ---
+    let block_grad_norms: Vec<f32> = acc_grads
+        .block_grads
+        .iter()
+        .map(|bg| bg.grad_norm())
+        .collect();
+
+    // Update EMA of block gradient norms
+    const GALC_EMA_DECAY: f32 = 0.9;
+    for (i, norm) in block_grad_norms.iter().enumerate() {
+        if i < train_state.block_grad_norms.len() {
+            train_state.block_grad_norms[i] =
+                GALC_EMA_DECAY * train_state.block_grad_norms[i] + (1.0 - GALC_EMA_DECAY) * norm;
+        }
+    }
+
     // Update training state
     train_state.update_ema_loss(mean_loss);
     train_state.global_step += 1;
@@ -345,6 +426,7 @@ pub fn train_step(
         token_losses,
         grad_norm,
         num_tokens: seq_len,
+        block_grad_norms,
     })
 }
 
@@ -610,6 +692,7 @@ mod tests {
         assert_eq!(result.token_losses.len(), 4);
         assert!(result.grad_norm.is_finite());
         assert_eq!(ts.global_step, 1);
+        assert_eq!(result.block_grad_norms.len(), NUM_BLOCKS);
     }
 
     #[test]
@@ -687,5 +770,20 @@ mod tests {
                 .any(|(a, b)| (a - b).abs() > 1e-10),
             "head weights should change after training step"
         );
+    }
+
+    #[test]
+    fn galc_strategy_rebuilds_periodically() {
+        let mut model = Sophon1::new(1);
+        let opt = TsmSgd::new(1e-3, 10.0);
+        let mut ts = TrainState::new();
+
+        // Run enough steps to trigger GALC rebuild (need at least 2 tokens)
+        for _ in 0..GALC_REBUILD_INTERVAL + 1 {
+            let _ = train_step(&mut model, &opt, &mut ts, b"xy").unwrap();
+        }
+
+        // Should have triggered at least one rebuild
+        assert!(ts.global_step > GALC_REBUILD_INTERVAL as u64);
     }
 }

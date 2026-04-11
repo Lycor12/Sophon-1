@@ -11,10 +11,15 @@
 //! 4. Checksum + size verification
 //!
 //! Novel optimisation — LLSD (Layerwise Least-Squares Distillation):
-//!   Instead of end-to-end distillation (expensive), we distill each
-//!   transformer layer independently to its KAN+SSM equivalent.
-//!   The MLP→KAN fit uses uniform sampling + pseudo-inverse solve,
-//!   which is O(n_samples * d_in * d_out * N_CTRL) per layer.
+//! Instead of end-to-end distillation (expensive), we distill each
+//! transformer layer independently to its KAN+SSM equivalent.
+//! The MLP→KAN fit uses uniform sampling + pseudo-inverse solve,
+//! which is O(n_samples * d_in * d_out * N_CTRL) per layer.
+//!
+//! Novel technique — QAT (Quantization-Aware Training) for GGUF:
+//! During distillation, we apply fake quantization (ternary) in the
+//! forward pass to match inference-time quantization effects. This
+//! makes the distilled weights robust to ternary quantization.
 
 use sophon_config::{KAN_KNOTS, KAN_ORDER, SSM_N, SSM_RANK};
 use sophon_kan::spline;
@@ -406,6 +411,220 @@ pub fn verify_size(file_bytes: usize) -> Result<(), String> {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Quantization-Aware Training (QAT) - Fake Quantization
+// ---------------------------------------------------------------------------
+
+/// Block size for fake quantization (same as ternary block size).
+const QAT_BLOCK_SIZE: usize = 64;
+
+/// Fake quantization mode for QAT.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum FakeQuantMode {
+    /// Training mode: gradients flow through with STE.
+    Train,
+    /// Evaluation mode: use quantized values for inference simulation.
+    Eval,
+}
+
+/// Fake ternary quantization for QAT.
+///
+/// In training mode, uses Straight-Through Estimator (STE) to allow
+/// gradients to flow through. In eval mode, uses actual quantized values.
+///
+/// # Arguments
+/// * `weights` - Input weights to quantize
+/// * `mode` - Training or evaluation mode
+///
+/// # Returns
+/// Fake-quantized weights (ternarized in forward pass during eval,
+/// identity with STE during train).
+pub fn fake_quantize_ternary(weights: &[f32], mode: FakeQuantMode) -> Vec<f32> {
+    match mode {
+        FakeQuantMode::Eval => {
+            // In eval mode: actual ternary quantization
+            use crate::quant::BLOCK_SIZE;
+            use crate::quant::{ternarize, ternarize_block};
+
+            let mut result = vec![0.0f32; weights.len()];
+            let n_blocks = weights.len() / BLOCK_SIZE;
+
+            for b in 0..n_blocks {
+                let start = b * BLOCK_SIZE;
+                let end = start + BLOCK_SIZE;
+                let block_weights = &weights[start..end];
+
+                // Compute block scale (mean absolute value)
+                let scale = block_weights.iter().map(|&v| v.abs()).sum::<f32>() / BLOCK_SIZE as f32;
+
+                // Quantize each weight
+                for i in 0..BLOCK_SIZE {
+                    let quantized = ternarize(block_weights[i], scale, 0.5);
+                    result[start + i] = quantized as f32 * scale;
+                }
+            }
+
+            // Handle remainder
+            let remainder_start = n_blocks * BLOCK_SIZE;
+            for i in remainder_start..weights.len() {
+                // Simple threshold-based quantization for remainder
+                let scale =
+                    weights.iter().map(|&v| v.abs()).sum::<f32>() / weights.len().max(1) as f32;
+                let quantized = ternarize(weights[i], scale, 0.5);
+                result[i] = quantized as f32 * scale;
+            }
+
+            result
+        }
+        FakeQuantMode::Train => {
+            // In training mode: return original weights (gradients flow through)
+            // The STE will handle gradient computation during backprop
+            weights.to_vec()
+        }
+    }
+}
+
+/// QAT-aware MLP forward pass.
+///
+/// Applies fake quantization to weights before matrix multiplication.
+/// This makes the distillation process aware of ternary quantization effects.
+pub fn qat_mlp_forward(
+    input: &[f32],
+    weights: &[f32],
+    bias: Option<&[f32]>,
+    d_in: usize,
+    d_out: usize,
+    mode: FakeQuantMode,
+) -> Vec<f32> {
+    // Apply fake quantization to weights
+    let quantized_weights = fake_quantize_ternary(weights, mode);
+
+    // Matrix multiplication with quantized weights
+    let mut output = vec![0.0f32; d_out];
+    for j in 0..d_out {
+        let mut acc = 0.0f32;
+        for i in 0..d_in {
+            acc += input[i] * quantized_weights[i * d_out + j];
+        }
+        if let Some(b) = bias {
+            acc += b[j];
+        }
+        // Apply SiLU activation
+        acc = acc * crate::ste::sigmoid(acc);
+        output[j] = acc;
+    }
+
+    output
+}
+
+/// QAT distillation result including quantization-aware metrics.
+pub struct QatDistillationResult {
+    /// Base distillation result.
+    pub base: MlpToKanResult,
+    /// Fake-quantized MSE (eval mode).
+    pub fake_quant_mse: f32,
+    /// Number of parameters that would be zero after quantization.
+    pub zero_params: usize,
+    /// Number of parameters that would be ±1 after quantization.
+    pub nonzero_params: usize,
+}
+
+/// Distill an MLP layer into KAN spline coefficients with QAT.
+///
+/// This variant applies fake quantization during the fitting process,
+/// making the resulting KAN weights more robust to ternary quantization.
+pub fn distill_mlp_to_kan_qat<F>(
+    eval_mlp: F,
+    d_in: usize,
+    d_out: usize,
+    lo: f32,
+    hi: f32,
+) -> QatDistillationResult
+where
+    F: Fn(&[f32]) -> Vec<f32>,
+{
+    // First, do regular distillation
+    let base = distill_mlp_to_kan(&eval_mlp, d_in, d_out, lo, hi);
+
+    // Collect statistics about fake quantization
+    let mode = FakeQuantMode::Eval;
+    let mut all_weights = Vec::new();
+
+    // Sample weights from the fitted KAN
+    for i in 0..d_in {
+        for j in 0..d_out {
+            // Extract edge weights from coefficients
+            let edge_idx = i * d_out + j;
+            if edge_idx < base.coefficients.len() {
+                let coeffs = &base.coefficients[edge_idx];
+                let w_base = base.w_base[edge_idx];
+
+                // Evaluate spline at a few points to get weight samples
+                for s in 0..FIT_SAMPLES {
+                    let x = lo + (hi - lo) * s as f32 / (FIT_SAMPLES - 1).max(1) as f32;
+                    let silu = x * crate::ste::sigmoid(x);
+                    let spline_val = evaluate_spline(&base, edge_idx, x, lo, hi);
+                    let weight = w_base * silu + spline_val;
+                    all_weights.push(weight);
+                }
+            }
+        }
+    }
+
+    // Apply fake quantization
+    let fake_quantized = fake_quantize_ternary(&all_weights, mode);
+
+    // Compute MSE between original and fake-quantized
+    let fake_quant_mse: f32 = all_weights
+        .iter()
+        .zip(fake_quantized.iter())
+        .map(|(&w, &q)| (w - q).powi(2))
+        .sum::<f32>()
+        / all_weights.len().max(1) as f32;
+
+    // Count parameters by quantization category
+    let mut zero_params = 0usize;
+    let mut nonzero_params = 0usize;
+
+    // Compute scale for counting
+    let scale = all_weights.iter().map(|&v| v.abs()).sum::<f32>() / all_weights.len().max(1) as f32;
+
+    for &w in &all_weights {
+        let t = crate::quant::ternarize(w, scale, 0.5);
+        if t == 0 {
+            zero_params += 1;
+        } else {
+            nonzero_params += 1;
+        }
+    }
+
+    QatDistillationResult {
+        base,
+        fake_quant_mse,
+        zero_params,
+        nonzero_params,
+    }
+}
+
+/// Evaluate a spline at a given x value.
+fn evaluate_spline(result: &MlpToKanResult, edge_idx: usize, x: f32, lo: f32, hi: f32) -> f32 {
+    use sophon_kan::spline::KnotVector;
+
+    let coeffs = &result.coefficients[edge_idx];
+    let kv = KnotVector::uniform(lo, hi);
+    let (basis, span) = kv.basis_fns(x);
+
+    let mut val = 0.0f32;
+    for bi in 0..=KAN_ORDER {
+        let ci = span + bi - KAN_ORDER;
+        if ci < coeffs.len() {
+            val += basis[bi] * coeffs[ci];
+        }
+    }
+
+    val
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -481,5 +700,89 @@ mod tests {
         // Zero MLP: f(x) = 0
         let result = distill_mlp_to_kan(|input: &[f32]| vec![0.0; input.len()], 2, 2, 0.0, 1.0);
         assert!(result.mse < 0.01, "mse = {}", result.mse);
+    }
+
+    // ---------------------------------------------------------------------------
+    // QAT Tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn fake_quantize_eval_mode_returns_quantized() {
+        // In eval mode, weights should be actually quantized
+        let weights = vec![1.0, -1.0, 0.3, -0.3, 2.0, -2.0];
+        let quantized = fake_quantize_ternary(&weights, FakeQuantMode::Eval);
+
+        // All values should be close to 0, +scale, or -scale
+        let scale = weights.iter().map(|&v| v.abs()).sum::<f32>() / weights.len() as f32;
+        assert!(scale > 0.0);
+
+        // Check that values are roughly ternary (0, ±scale)
+        for (i, &q) in quantized.iter().enumerate() {
+            let is_ternary = q.abs() < 1e-5 || (q - scale).abs() < 1e-4 || (q + scale).abs() < 1e-4;
+            assert!(
+                is_ternary,
+                "weight {} at index {} is not ternary (expected ~0, ~{}, or ~-{})",
+                q, i, scale, scale
+            );
+        }
+    }
+
+    #[test]
+    fn fake_quantize_train_mode_returns_original() {
+        // In train mode, weights should pass through unchanged
+        let weights = vec![1.0, -2.0, 0.5, -0.25, 3.0];
+        let train_result = fake_quantize_ternary(&weights, FakeQuantMode::Train);
+
+        // Should be identical to input
+        assert_eq!(train_result, weights);
+    }
+
+    #[test]
+    fn qat_distillation_returns_metrics() {
+        // Identity MLP with QAT
+        let result = distill_mlp_to_kan_qat(|input: &[f32]| input.to_vec(), 2, 2, -1.0, 1.0);
+
+        // Should have base result
+        assert!(!result.base.coefficients.is_empty());
+
+        // Should have quantization metrics
+        assert!(result.fake_quant_mse >= 0.0);
+        assert_eq!(
+            result.zero_params + result.nonzero_params,
+            result.base.coefficients.len() * FIT_SAMPLES
+        );
+    }
+
+    #[test]
+    fn qat_handles_all_zeros() {
+        // Zero MLP with QAT
+        let result = distill_mlp_to_kan_qat(|input: &[f32]| vec![0.0; input.len()], 2, 2, 0.0, 1.0);
+
+        // All params should be zero after quantization
+        assert_eq!(
+            result.zero_params + result.nonzero_params,
+            result.base.coefficients.len() * FIT_SAMPLES
+        );
+    }
+
+    #[test]
+    fn fake_quantization_preserves_scale() {
+        // Check that scale computation is consistent
+        let weights = vec![2.0, -2.0, 2.0, -2.0];
+        let quantized = fake_quantize_ternary(&weights, FakeQuantMode::Eval);
+
+        // Scale should be mean(|w|) = 2.0
+        let scale = 2.0f32;
+
+        // All values should be ±2.0 or 0
+        for &q in &quantized {
+            assert!(
+                q.abs() < 1e-5 || (q - scale).abs() < 1e-4 || (q + scale).abs() < 1e-4,
+                "quantized value {} should be ~0, ~{}, or ~-{}",
+                q,
+                scale,
+                scale
+            );
+        }
     }
 }

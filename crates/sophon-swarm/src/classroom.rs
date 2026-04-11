@@ -32,6 +32,7 @@
 use crate::selection::{RankedSolution, Selection, SelectionConfig};
 use crate::student::{SolutionAttempt, Student, StudentConfig};
 use crate::teacher::{CurriculumConfig, Problem, Teacher};
+use sophon_config::{D_MODEL, LORA_RANK, SSM_N, SSM_P};
 use sophon_verifier::{FilterResult, KnowledgeBase, ProofCandidate, TrivialityFilter};
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,22 @@ pub struct Classroom {
 }
 
 impl Classroom {
+    /// Compute the sizes of LoRA B matrices for the three adapters.
+    ///
+    /// LoRA adapters are:
+    /// 1. kan_adapter: [D_MODEL, LORA_RANK] = D_MODEL * LORA_RANK
+    /// 2. ssm_b_adapter: [SSM_N, LORA_RANK] = SSM_N * LORA_RANK  
+    /// 3. ssm_c_adapter: [SSM_P, LORA_RANK] = SSM_P * LORA_RANK
+    ///
+    /// Total B parameters = (D_MODEL + SSM_N + SSM_P) * LORA_RANK
+    fn compute_adapter_b_sizes() -> Vec<usize> {
+        vec![
+            D_MODEL * LORA_RANK, // kan_adapter B size
+            SSM_N * LORA_RANK,   // ssm_b_adapter B size
+            SSM_P * LORA_RANK,   // ssm_c_adapter B size
+        ]
+    }
+
     /// Create a new classroom.
     pub fn new(config: ClassroomConfig) -> Self {
         let teacher = Teacher::new(config.curriculum_config.clone(), config.seed);
@@ -169,18 +186,19 @@ impl Classroom {
         let mut total_attempts = 0usize;
         let mut total_accepted = 0usize;
 
+        // Compute adapter B sizes once per epoch
+        let adapter_b_sizes = Self::compute_adapter_b_sizes();
+
         // 2. For each problem
         for problem in &problems {
             let mut all_attempts: Vec<SolutionAttempt> = Vec::new();
 
             // 3. Each student attempts the problem
             for student in &mut self.students {
-                // NPSI: generate noise
-                // For the adapter B sizes, we use placeholder sizes since
-                // the actual model isn't wired in yet
-                let adapter_sizes = vec![256 * 16, 128 * 16, 256 * 16]; // kan, ssm_b, ssm_c
+                // NPSI: generate noise for LoRA B matrices
+                // Noise is applied to the B matrices which have shape [d_out, rank]
                 let perturbations =
-                    student.generate_noise(adapter_sizes.len(), &adapter_sizes, level);
+                    student.generate_noise(adapter_b_sizes.len(), &adapter_b_sizes, level);
 
                 // Generate solution (via callback)
                 let (bytes, logits, targets) =
@@ -466,6 +484,63 @@ mod tests {
         assert_eq!(result.student_success_rates.len(), 3);
         for rate in &result.student_success_rates {
             assert!(*rate >= 0.0 && *rate <= 1.0);
+        }
+    }
+
+    #[test]
+    fn adapter_b_sizes_computed_correctly() {
+        // Verify that adapter sizes are computed from config constants
+        let sizes = Classroom::compute_adapter_b_sizes();
+        assert_eq!(sizes.len(), 3);
+
+        // kan_adapter: D_MODEL * LORA_RANK
+        assert_eq!(sizes[0], D_MODEL * LORA_RANK);
+
+        // ssm_b_adapter: SSM_N * LORA_RANK
+        assert_eq!(sizes[1], SSM_N * LORA_RANK);
+
+        // ssm_c_adapter: SSM_P * LORA_RANK
+        assert_eq!(sizes[2], SSM_P * LORA_RANK);
+
+        // All sizes should be positive
+        for size in &sizes {
+            assert!(*size > 0, "adapter size must be positive");
+        }
+    }
+
+    #[test]
+    fn adapter_sizes_affect_perturbations() {
+        use sophon_config::{D_MODEL, LORA_RANK, SSM_N, SSM_P};
+
+        let mut classroom = Classroom::new(ClassroomConfig::default());
+        let adapter_sizes = Classroom::compute_adapter_b_sizes();
+
+        // Generate noise for first student
+        let perturbations =
+            classroom.students[0].generate_noise(adapter_sizes.len(), &adapter_sizes, 1);
+
+        // Verify perturbations have correct sizes
+        assert_eq!(perturbations.len(), 3);
+        assert_eq!(perturbations[0].len(), D_MODEL * LORA_RANK);
+        assert_eq!(perturbations[1].len(), SSM_N * LORA_RANK);
+        assert_eq!(perturbations[2].len(), SSM_P * LORA_RANK);
+    }
+
+    #[test]
+    fn lora_rank_consistency() {
+        // Verify that LORA_RANK is used consistently
+        // The B matrices in LoRA are [d_out, rank], so sizes should be d_out * rank
+        let sizes = Classroom::compute_adapter_b_sizes();
+
+        // Check that sizes are multiples of LORA_RANK
+        for size in &sizes {
+            assert_eq!(
+                size % LORA_RANK,
+                0,
+                "size {} should be multiple of LORA_RANK {}",
+                size,
+                LORA_RANK
+            );
         }
     }
 }

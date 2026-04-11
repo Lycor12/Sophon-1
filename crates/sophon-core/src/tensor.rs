@@ -2,6 +2,25 @@
 //!
 //! All data is stored in row-major (C) order.
 //! No unsafe code; all indexing goes through checked slices.
+//!
+//! # Examples
+//!
+//! ```
+//! use sophon_core::Tensor;
+//!
+//! // Create a 1-D tensor
+//! let a = Tensor::zeros_1d(5);
+//! assert_eq!(a.len(), 5);
+//! assert_eq!(a.shape(), [1, 5]);
+//!
+//! // Create from slice
+//! let b = Tensor::from_slice_1d(&[1.0, 2.0, 3.0]);
+//! assert_eq!(b.as_slice(), &[1.0, 2.0, 3.0]);
+//!
+//! // 2-D tensor
+//! let c = Tensor::zeros_2d(3, 4);
+//! assert_eq!(c.shape(), [3, 4]);
+//!```
 
 use crate::error::CoreError;
 
@@ -25,6 +44,16 @@ impl Tensor {
     // ------------------------------------------------------------------
 
     /// Create a 1-D zero tensor of length `n`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sophon_core::Tensor;
+    ///
+    /// let t = Tensor::zeros_1d(3);
+    /// assert_eq!(t.len(), 3);
+    /// assert!(t.as_slice().iter().all(|&x| x == 0.0));
+    ///```
     #[inline]
     pub fn zeros_1d(n: usize) -> Self {
         Self {
@@ -35,6 +64,16 @@ impl Tensor {
     }
 
     /// Create a 2-D zero tensor of shape `[rows, cols]`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sophon_core::Tensor;
+    ///
+    /// let t = Tensor::zeros_2d(2, 3);
+    /// assert_eq!(t.shape(), [2, 3]);
+    /// assert_eq!(t.len(), 6);
+    ///```
     #[inline]
     pub fn zeros_2d(rows: usize, cols: usize) -> Self {
         Self {
@@ -45,6 +84,15 @@ impl Tensor {
     }
 
     /// Create a 1-D tensor from an existing slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sophon_core::Tensor;
+    ///
+    /// let t = Tensor::from_slice_1d(&[1.0, 2.0, 3.0]);
+    /// assert_eq!(t.as_slice(), &[1.0, 2.0, 3.0]);
+    ///```
     #[inline]
     pub fn from_slice_1d(data: &[f32]) -> Self {
         Self {
@@ -54,7 +102,48 @@ impl Tensor {
         }
     }
 
+    /// Create a 1-D tensor from an owned Vec (no copy).
+    /// The cols parameter is for API compatibility; vec length must match cols.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sophon_core::Tensor;
+    ///
+    /// let v = vec![1.0, 2.0, 3.0];
+    /// let t = Tensor::from_vec(v, 3);
+    /// assert_eq!(t.as_slice(), &[1.0, 2.0, 3.0]);
+    ///```
+    #[inline]
+    pub fn from_vec(data: Vec<f32>, cols: usize) -> Self {
+        assert_eq!(
+            data.len(),
+            cols,
+            "Tensor::from_vec: data length must match cols"
+        );
+        Self {
+            data,
+            rows: 1,
+            cols,
+        }
+    }
+
     /// Create a 2-D tensor from a flat row-major slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sophon_core::Tensor;
+    ///
+    /// // Create 2x3 matrix from flat slice
+    /// let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    /// let t = Tensor::from_slice_2d(&data, 2, 3).unwrap();
+    /// assert_eq!(t.shape(), [2, 3]);
+    ///
+    /// // Error on insufficient data
+    /// let result = Tensor::from_slice_2d(&[1.0, 2.0], 2, 3);
+    /// assert!(result.is_err());
+    ///```
     pub fn from_slice_2d(data: &[f32], rows: usize, cols: usize) -> Result<Self, CoreError> {
         let required = rows * cols;
         if data.len() < required {
@@ -110,6 +199,18 @@ impl Tensor {
     }
 
     /// Shape as `[rows, cols]`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sophon_core::Tensor;
+    ///
+    /// let t1 = Tensor::zeros_1d(5);
+    /// assert_eq!(t1.shape(), [1, 5]);
+    ///
+    /// let t2 = Tensor::zeros_2d(3, 4);
+    /// assert_eq!(t2.shape(), [3, 4]);
+    ///```
     #[inline]
     pub fn shape(&self) -> [usize; 2] {
         [self.rows, self.cols]
@@ -119,6 +220,17 @@ impl Tensor {
     // Indexing
     // ------------------------------------------------------------------
 
+    /// Get element at (row, col).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use sophon_core::Tensor;
+    ///
+    /// let mut t = Tensor::zeros_2d(2, 3);
+    /// t.set(1, 2, 5.0).unwrap();
+    /// assert_eq!(t.get(1, 2).unwrap(), 5.0);
+    ///```
     #[inline]
     pub fn get(&self, row: usize, col: usize) -> Result<f32, CoreError> {
         if row >= self.rows || col >= self.cols {

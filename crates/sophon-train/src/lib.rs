@@ -20,9 +20,11 @@
 
 #![forbid(unsafe_code)]
 
-pub mod step;
-pub mod state;
 pub mod checkpoint;
+pub mod checkpoint_io;
+pub mod state;
+pub mod step;
 
-pub use step::{train_step, TrainStepResult};
+pub use checkpoint_io::{load_checkpoint, save_checkpoint, CheckpointError};
 pub use state::TrainState;
+pub use step::{train_step, TrainStepResult};

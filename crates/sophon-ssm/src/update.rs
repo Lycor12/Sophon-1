@@ -1,21 +1,26 @@
 //! Per-token SSM state update and output computation.
 //!
 //! Forward step (spec §1.2.1):
-//!   h_{t+1} = A_bar h_t + B_bar u_t
-//!   y_t     = C h_t + D u_t
+//! h_{t+1} = A_bar h_t + B_bar u_t
+//! y_t = C h_t + D u_t
 //!
 //! Novel optimisation — Fused State-Output (FSO):
-//!   The standard implementation does A_bar h, then B_bar u, then sums,
-//!   then computes C h. FSO fuses the C h computation with the A_bar h
-//!   pass: while computing A_bar h we simultaneously accumulate C h.
-//!   This halves the number of passes over h from 2 to 1 (since C and
-//!   A_bar share the same h[j] access pattern).
+//! The standard implementation does A_bar h, then B_bar u, then sums,
+//! then computes C h. FSO fuses the C h computation with the A_bar h
+//! pass: while computing A_bar h we simultaneously accumulate C h.
+//! This halves the number of passes over h from 2 to 1 (since C and
+//! A_bar share the same h[j] access pattern).
+//!
+//! Novel technique — Recurrent State Normalization (RSN):
+//! After each state update, apply L2 norm clamping to prevent state
+//! explosion during long sequences. This is integrated into the step
+//! function and applies the state's configured threshold.
 //!
 //! Input injection (spec §1.2.3):
-//!   u_t is the KAN layer output (projected from d_model to SSM_D if needed).
-//!   In the canonical block, SSM_D = d_model = 256, so no projection needed.
+//! u_t is the KAN layer output (projected from d_model to SSM_D if needed).
+//! In the canonical block, SSM_D = d_model = 256, so no projection needed.
 
-use crate::{params::SsmParams, zoh::DiscretisedSsm, SsmState};
+use crate::{params::SsmParams, state::DEFAULT_NORM_THRESHOLD, zoh::DiscretisedSsm, SsmState};
 use sophon_config::{SSM_D, SSM_N, SSM_P, SSM_RANK};
 
 // ---------------------------------------------------------------------------
@@ -89,7 +94,11 @@ pub fn ssm_step(
     // Commit new hidden state
     state.h.copy_from_slice(&new_h);
 
-    // Step 4: y += D u  (feedthrough, D is usually near-zero)
+    // Step 3.5: Recurrent State Normalization (RSN)
+    // Apply L2 norm clamping to prevent state explosion during long sequences
+    state.normalize();
+
+    // Step 4: y += D u (feedthrough, D is usually near-zero)
     let d_data = &params.d; // shape [P, D]
     for q in 0..p {
         let mut acc = 0.0f32;
@@ -168,5 +177,62 @@ mod tests {
             let _y = ssm_step(&mut state, &disc, &params, &u);
             assert!(state.is_valid(), "state became invalid");
         }
+    }
+
+    #[test]
+    fn state_normalization_prevents_explosion() {
+        // Create a state with a low threshold to force normalization
+        let mut state = SsmState::with_threshold(10.0);
+        let params = SsmParams::new_stable(0);
+        let disc = DiscretisedSsm::from_params(&params);
+
+        // Use a larger input to potentially cause state growth
+        let u: Vec<f32> = vec![1.0f32; SSM_D];
+
+        // Run many steps - without normalization, state could explode
+        for _ in 0..1000 {
+            let _y = ssm_step(&mut state, &disc, &params, &u);
+            // Verify state remains valid and bounded
+            assert!(
+                state.is_valid(),
+                "state became invalid during long sequence"
+            );
+            // Check that the norm is bounded (either below threshold or at threshold)
+            let norm = state.l2_norm();
+            assert!(
+                norm <= state.norm_threshold * 1.01,
+                "state norm {} exceeded threshold {} after RSN",
+                norm,
+                state.norm_threshold
+            );
+        }
+    }
+
+    #[test]
+    fn normalization_applied_after_step() {
+        let mut state = SsmState::with_threshold(0.1); // Very low threshold
+                                                       // Manually set state to exceed threshold
+        for i in 0..SSM_N {
+            state.h[i] = 1.0;
+        }
+        let norm_before = state.l2_norm();
+        assert!(norm_before > state.norm_threshold);
+
+        // Create params and disc
+        let params = SsmParams::new_stable(0);
+        let disc = DiscretisedSsm::from_params(&params);
+        let u = vec![0.0f32; SSM_D];
+
+        // Step should apply normalization
+        let _y = ssm_step(&mut state, &disc, &params, &u);
+
+        // After step, norm should be clamped to threshold
+        let norm_after = state.l2_norm();
+        assert!(
+            (norm_after - state.norm_threshold).abs() < 0.01 || norm_after < state.norm_threshold,
+            "expected norm near threshold {}, got {}",
+            state.norm_threshold,
+            norm_after
+        );
     }
 }

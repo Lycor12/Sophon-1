@@ -1,0 +1,1 @@
+cargo check -p sophon-eval 2>&1 | Select-String -Pattern "^error\[|could not compile" -Context 0,10

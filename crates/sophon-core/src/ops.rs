@@ -56,9 +56,32 @@
 //!           running_max = x_i
 //!         else:
 //!           sum += exp(x_i - running_max)
-//!     After the single pass, we have (running_max, sum) and can compute
-//!     softmax_i = exp(x_i - running_max) / sum in a second pass.
-//!     This saves one full read of the input vector compared to 2-pass.
+//! After the single pass, we have (running_max, sum) and can compute
+//! softmax_i = exp(x_i - running_max) / sum in a second pass.
+//! This saves one full read of the input vector compared to 2-pass.
+//!
+//! # Examples
+//!
+//! ```
+//! use sophon_core::{Tensor, ops::{gemv, gemm, softmax_1d}};
+//!
+//! // Matrix-vector multiplication
+//! let a = Tensor::from_slice_2d(&[1.0, 2.0, 3.0, 4.0], 2, 2).unwrap();
+//! let x = Tensor::from_slice_1d(&[1.0, 0.0]);
+//! let y = gemv(&a, &x).unwrap();
+//! assert_eq!(y.as_slice(), &[1.0, 3.0]);
+//!
+//! // Matrix-matrix multiplication
+//! let b = Tensor::from_slice_2d(&[1.0, 0.0, 0.0, 1.0], 2, 2).unwrap();
+//! let c = gemm(&a, &b).unwrap();
+//! assert_eq!(c.as_slice(), &[1.0, 2.0, 3.0, 4.0]);
+//!
+//! // Softmax
+//! let logits = Tensor::from_slice_1d(&[1.0, 2.0, 3.0]);
+//! let probs = softmax_1d(&logits).unwrap();
+//! let sum: f32 = probs.as_slice().iter().sum();
+//! assert!((sum - 1.0).abs() < 1e-6);
+//! ```
 
 #![allow(clippy::needless_range_loop)]
 

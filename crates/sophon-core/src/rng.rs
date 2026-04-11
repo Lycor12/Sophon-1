@@ -7,6 +7,27 @@
 //!
 //! Reference: Blackman & Vigna 2019, "Scrambled Linear Pseudorandom
 //! Number Generators".
+//!
+//! # Examples
+//!
+//! ```
+//! use sophon_core::Rng;
+//!
+//! // Create RNG with fixed seed
+//! let mut rng = Rng::new(42);
+//!
+//! // Generate random values
+//! let u = rng.next_u64();
+//! let f = rng.next_f32();
+//! assert!(f >= 0.0 && f < 1.0);
+//!
+//! // Normal distribution
+//! let n = rng.next_normal(0.0, 1.0);
+//!
+//! // Fill buffers
+//! let mut buf = [0.0f32; 100];
+//! rng.fill_uniform(&mut buf);
+//! ```
 
 // ---------------------------------------------------------------------------
 // xoshiro256**

@@ -72,9 +72,9 @@ pub struct SuiteMetrics {
 }
 
 /// Model interface for benchmark evaluation.
-pub trait ModelInference {
+pub trait ModelInference: Send {
     /// Generate a response from the model given an input prompt.
-    fn generate(&mut self, input: &str) -> Result<String, Box<dyn std::error::Error>>;
+    fn generate(&mut self, input: &str) -> Result<String, Box<dyn std::error::Error + Send>>;
 }
 
 impl Benchmark {
@@ -228,7 +228,7 @@ impl BenchmarkTask {
 struct PlaceholderModel;
 
 impl ModelInference for PlaceholderModel {
-    fn generate(&mut self, _input: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn generate(&mut self, _input: &str) -> Result<String, Box<dyn std::error::Error + Send>> {
         // Return a simple placeholder response for backward compatibility
         Ok("placeholder response".to_string())
     }
@@ -367,19 +367,25 @@ impl SophonModelAdapter {
 }
 
 impl ModelInference for SophonModelAdapter {
-    fn generate(&mut self, input: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn generate(&mut self, input: &str) -> Result<String, Box<dyn std::error::Error + Send>> {
         // Convert input to bytes and run through the model
         let input_bytes = input.as_bytes();
         let mut output = String::new();
 
         // Process input sequence
         self.model.reset_state();
-        let _ = self.model.forward_sequence(input_bytes)?;
+        let _ = self
+            .model
+            .forward_sequence(input_bytes)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send>)?;
 
         // Generate output tokens autoregressively
         let mut current_token = b' ';
         for _ in 0..self.max_tokens {
-            let model_output = self.model.forward_token(current_token)?;
+            let model_output = self
+                .model
+                .forward_token(current_token)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send>)?;
             current_token = model_output.predicted_token;
 
             // Stop at end-of-sequence or non-printable characters

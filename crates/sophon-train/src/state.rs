@@ -5,6 +5,8 @@ use sophon_kan::spline::N_CTRL;
 use sophon_optim::param_group::{ParamGroup, ParamKind};
 use sophon_optim::tsm::MomentumState;
 
+use crate::checkpoint::CheckpointStrategy;
+
 // ---------------------------------------------------------------------------
 // Per-block momentum state
 // ---------------------------------------------------------------------------
@@ -94,6 +96,64 @@ pub struct TrainState {
     pub ema_loss: f32,
     /// EMA decay factor.
     pub ema_decay: f32,
+    /// GALC checkpointing strategy.
+    pub checkpoint_strategy: CheckpointStrategy,
+    /// Per-block gradient norm EMA (for GALC strategy building).
+    pub block_grad_norms: Vec<f32>,
+    /// Learning rate schedule state.
+    pub lr_schedule: LrScheduleState,
+}
+
+/// Learning rate schedule state.
+#[derive(Debug, Clone)]
+pub struct LrScheduleState {
+    /// Base learning rate.
+    pub base_lr: f32,
+    /// Current learning rate (after warmup/cosine).
+    pub current_lr: f32,
+    /// Warmup steps.
+    pub warmup_steps: u64,
+    /// Total training steps for cosine annealing.
+    pub total_steps: u64,
+    /// Minimum learning rate.
+    pub min_lr: f32,
+}
+
+impl LrScheduleState {
+    /// Create a new LR schedule with warmup and cosine annealing.
+    pub fn with_warmup_and_cosine(
+        base_lr: f32,
+        warmup_steps: u64,
+        total_steps: u64,
+        min_lr: f32,
+    ) -> Self {
+        Self {
+            base_lr,
+            current_lr: base_lr,
+            warmup_steps,
+            total_steps,
+            min_lr,
+        }
+    }
+
+    /// Get the learning rate for the current step.
+    pub fn get_lr(&self, step: u64) -> f32 {
+        if step < self.warmup_steps {
+            // Linear warmup
+            self.base_lr * (step as f32) / (self.warmup_steps as f32)
+        } else {
+            // Cosine annealing
+            let progress =
+                (step - self.warmup_steps) as f32 / (self.total_steps - self.warmup_steps) as f32;
+            let cosine = (1.0 + (std::f32::consts::PI * progress).cos()) / 2.0;
+            self.min_lr + (self.base_lr - self.min_lr) * cosine
+        }
+    }
+
+    /// Update the current learning rate.
+    pub fn update(&mut self, step: u64) {
+        self.current_lr = self.get_lr(step);
+    }
 }
 
 /// Pre-built parameter group configurations.
@@ -146,7 +206,15 @@ impl TrainState {
             global_step: 0,
             ema_loss: 0.0,
             ema_decay: 0.99,
+            checkpoint_strategy: CheckpointStrategy::default(),
+            block_grad_norms: vec![1.0f32; NUM_BLOCKS], // Initialize to uniform values
+            lr_schedule: LrScheduleState::with_warmup_and_cosine(1e-3, 1000, 100_000, 1e-5),
         }
+    }
+
+    /// Get the current learning rate from the schedule.
+    pub fn current_lr(&self) -> f32 {
+        self.lr_schedule.get_lr(self.global_step)
     }
 
     /// Update the EMA loss tracker.

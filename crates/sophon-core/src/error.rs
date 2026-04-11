@@ -19,6 +19,8 @@ pub enum CoreError {
     IndexOutOfBounds { index: usize, len: usize },
 }
 
+impl std::error::Error for CoreError {}
+
 impl fmt::Display for CoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

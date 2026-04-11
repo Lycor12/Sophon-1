@@ -3,11 +3,17 @@
 //! Spec §0.6.1: gradients for the ternary quantisation function use STE.
 //!
 //! STE definition:
-//!   Forward:  q  = sign(w) for |w| > threshold, 0 otherwise
-//!   Backward: dL/dw ≈ dL/dq * 1_{|w| <= 1}
+//! Forward: q = sign(w) for |w| > threshold, 0 otherwise
+//! Backward: dL/dw ≈ dL/dq * 1_{|w| <= 1}
 //!
 //! The 1_{|w| <= 1} clipping prevents the gradient from flowing through
 //! heavily saturated weights, acting as a natural regulariser.
+
+/// Sigmoid activation function.
+#[inline]
+pub fn sigmoid(x: f32) -> f32 {
+    1.0 / (1.0 + (-x).exp())
+}
 
 /// Straight-through estimator: compute gradient w.r.t. pre-quantised weight.
 ///

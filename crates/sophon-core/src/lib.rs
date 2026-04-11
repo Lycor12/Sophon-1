@@ -34,10 +34,17 @@
 
 pub mod error;
 pub mod hdc;
+pub mod json;
 pub mod norm;
 pub mod ops;
+pub mod regex;
 pub mod rng;
 pub mod tensor;
 
 pub use error::CoreError;
+pub use json::{
+    parse as parse_json, stringify as stringify_json, JsonRpcRequest, JsonRpcResponse, JsonValue,
+};
+pub use regex::Regex;
+pub use rng::Rng;
 pub use tensor::Tensor;

@@ -1,0 +1,13 @@
+[package]
+name = "sophon-tui"
+version = "0.1.0"
+edition = "2021"
+authors = ["Sophon Contributors"]
+description = "React+Ink-inspired terminal UI framework for Sophon AGI"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+sophon-core = { path = "../sophon-core" }
+
+[features]
+default = []
