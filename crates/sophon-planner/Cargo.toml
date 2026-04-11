@@ -1,0 +1,15 @@
+[package]
+name = "sophon-planner"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+
+[dependencies]
+sophon-config = { path = "../sophon-config" }
+sophon-core = { path = "../sophon-core" }
+sophon-memory = { path = "../sophon-memory" }
+sophon-runtime = { path = "../sophon-runtime" }
+
+[lib]
+name = "sophon_planner"

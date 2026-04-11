@@ -1,0 +1,17 @@
+[package]
+name = "sophon-eval"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "MIT"
+
+[dependencies]
+sophon-config = { path = "../sophon-config" }
+sophon-core = { path = "../sophon-core" }
+sophon-model = { path = "../sophon-model" }
+sophon-memory = { path = "../sophon-memory" }
+sophon-planner = { path = "../sophon-planner" }
+sophon-runtime = { path = "../sophon-runtime" }
+
+[lib]
+name = "sophon_eval"

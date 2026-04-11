@@ -44,6 +44,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sophon-eval"
+version = "0.1.0"
+dependencies = [
+ "sophon-config",
+ "sophon-core",
+ "sophon-memory",
+ "sophon-model",
+ "sophon-planner",
+ "sophon-runtime",
+]
+
+[[package]]
 name = "sophon-inference"
 version = "0.1.0"
 dependencies = [
@@ -69,6 +81,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sophon-memory"
+version = "0.1.0"
+dependencies = [
+ "sophon-config",
+ "sophon-core",
+]
+
+[[package]]
 name = "sophon-model"
 version = "0.1.0"
 dependencies = [
@@ -86,6 +106,16 @@ version = "0.1.0"
 dependencies = [
  "sophon-config",
  "sophon-core",
+]
+
+[[package]]
+name = "sophon-planner"
+version = "0.1.0"
+dependencies = [
+ "sophon-config",
+ "sophon-core",
+ "sophon-memory",
+ "sophon-runtime",
 ]
 
 [[package]]

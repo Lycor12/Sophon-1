@@ -17,6 +17,10 @@ members = [
     "crates/sophon-swarm",
     "crates/sophon-data",
     "crates/sophon-accel",
+    # "crates/sophon-parse",  # Skip - Lean autoformalizer handles parsing
+    "crates/sophon-memory",
+    "crates/sophon-planner",
+    "crates/sophon-eval",
     "crates/sophon-cli",
 ]
 
