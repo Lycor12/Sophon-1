@@ -21,7 +21,7 @@ members = [
     "crates/sophon-memory",
     "crates/sophon-planner",
     "crates/sophon-eval",
-    "crates/sophon-cli",
+    "crates/sophon-cli", "crates/sophon-integration",
 ]
 
 [workspace.package]

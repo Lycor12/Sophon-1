@@ -278,6 +278,18 @@ impl LoraBlock {
             + self.ssm_b_adapter.param_count()
             + self.ssm_c_adapter.param_count()
     }
+
+    /// Flatten all adapter parameters into a single vector.
+    pub fn flattened_params(&self) -> Vec<f32> {
+        let mut params = Vec::with_capacity(self.param_count());
+        params.extend_from_slice(&self.kan_adapter.b);
+        params.extend_from_slice(&self.kan_adapter.a);
+        params.extend_from_slice(&self.ssm_b_adapter.b);
+        params.extend_from_slice(&self.ssm_b_adapter.a);
+        params.extend_from_slice(&self.ssm_c_adapter.b);
+        params.extend_from_slice(&self.ssm_c_adapter.a);
+        params
+    }
 }
 
 // ---------------------------------------------------------------------------

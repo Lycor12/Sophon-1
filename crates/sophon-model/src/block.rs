@@ -156,12 +156,49 @@ impl HybridBlock {
 
     /// Total learnable parameter count for this block.
     pub fn param_count(&self) -> usize {
-        let base = 2 * D_MODEL  // ln1 gamma+beta
+        let base = 2 * D_MODEL // ln1 gamma+beta
             + self.kan.param_count()
-            + 2 * D_MODEL  // ln2 gamma+beta
+            + 2 * D_MODEL // ln2 gamma+beta
             + self.ssm_params.param_count();
         let lora = self.lora.as_ref().map_or(0, |l| l.param_count());
         base + lora
+    }
+
+    /// Flatten all trainable parameters into a single vector.
+    pub fn flattened_params(&self) -> Vec<f32> {
+        let mut params = Vec::with_capacity(self.param_count());
+
+        // LayerNorm 1 parameters
+        params.extend_from_slice(&self.ln1_gamma);
+        params.extend_from_slice(&self.ln1_beta);
+
+        // KAN layer parameters (coefficients, w_base, knots, bias)
+        for edge in &self.kan.edges {
+            params.extend_from_slice(&edge.c);
+            params.push(edge.w_base);
+            params.extend_from_slice(&edge.kv.internal_knots()[..]);
+        }
+        params.extend_from_slice(&self.kan.bias);
+
+        // LayerNorm 2 parameters
+        params.extend_from_slice(&self.ln2_gamma);
+        params.extend_from_slice(&self.ln2_beta);
+
+        // SSM parameters
+        params.extend_from_slice(&self.ssm_params.s);
+        params.extend_from_slice(&self.ssm_params.u);
+        params.extend_from_slice(&self.ssm_params.v);
+        params.extend_from_slice(&self.ssm_params.b);
+        params.extend_from_slice(&self.ssm_params.c);
+        params.extend_from_slice(&self.ssm_params.d);
+        params.push(self.ssm_params.log_delta);
+
+        // LoRA parameters if present
+        if let Some(ref lora) = self.lora {
+            params.extend(lora.flattened_params());
+        }
+
+        params
     }
 }
 

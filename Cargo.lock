@@ -16,11 +16,14 @@ version = "0.1.0"
 dependencies = [
  "sophon-config",
  "sophon-core",
+ "sophon-data",
  "sophon-inference",
  "sophon-model",
+ "sophon-optim",
  "sophon-quant",
  "sophon-runtime",
  "sophon-safety",
+ "sophon-train",
  "sophon-verifier",
 ]
 

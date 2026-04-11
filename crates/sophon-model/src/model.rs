@@ -111,6 +111,28 @@ impl Sophon1 {
             + self.blocks.iter().map(|b| b.param_count()).sum::<usize>()
             + self.head.param_count()
     }
+
+    /// Flatten all trainable parameters into a single vector.
+    /// Used for alignment monitoring, checkpointing, and parameter drift detection.
+    pub fn flattened_params(&self) -> Vec<f32> {
+        let mut params = Vec::with_capacity(self.param_count());
+
+        // Embedding table
+        params.extend_from_slice(self.embedding.table_slice());
+
+        // All blocks
+        for block in &self.blocks {
+            params.extend(block.flattened_params().iter().copied());
+        }
+
+        // Head parameters
+        params.extend_from_slice(&self.head.weight);
+        params.extend_from_slice(&self.head.bias);
+        params.extend_from_slice(&self.head.ln_gamma);
+        params.extend_from_slice(&self.head.ln_beta);
+
+        params
+    }
 }
 
 // ---------------------------------------------------------------------------

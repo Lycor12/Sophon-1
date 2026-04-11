@@ -9,11 +9,14 @@ name = "sophon"
 path = "src/main.rs"
 
 [dependencies]
-sophon-config   = { path = "../sophon-config" }
-sophon-core     = { path = "../sophon-core" }
-sophon-model    = { path = "../sophon-model" }
-sophon-runtime  = { path = "../sophon-runtime" }
+sophon-config = { path = "../sophon-config" }
+sophon-core = { path = "../sophon-core" }
+sophon-model = { path = "../sophon-model" }
+sophon-runtime = { path = "../sophon-runtime" }
 sophon-verifier = { path = "../sophon-verifier" }
-sophon-safety   = { path = "../sophon-safety" }
+sophon-safety = { path = "../sophon-safety" }
 sophon-inference = { path = "../sophon-inference" }
-sophon-quant    = { path = "../sophon-quant" }
+sophon-quant = { path = "../sophon-quant" }
+sophon-data = { path = "../sophon-data" }
+sophon-train = { path = "../sophon-train" }
+sophon-optim = { path = "../sophon-optim" }

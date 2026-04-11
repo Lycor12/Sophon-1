@@ -86,6 +86,11 @@ impl ByteEmbedding {
         &mut self.table
     }
 
+    /// Immutable slice of the embedding table (for parameter extraction).
+    pub fn table_slice(&self) -> &[f32] {
+        &self.table
+    }
+
     /// Parameter count.
     pub fn param_count(&self) -> usize {
         VOCAB_SIZE * D_MODEL
