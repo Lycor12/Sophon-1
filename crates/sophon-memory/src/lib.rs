@@ -90,7 +90,12 @@ impl UnifiedMemory {
         UnifiedQueryResult {
             episodic: self.episodic.retrieve_similar(query_hv, 5),
             semantic: self.semantic.query_by_content(query_hv, 5),
-            procedural: self.procedural.find_matching(query_hv, 5),
+            procedural: self
+                .procedural
+                .find_matching(query_hv, 5)
+                .into_iter()
+                .cloned()
+                .collect(),
             interoceptive: self.interoceptive.current_state(),
         }
     }

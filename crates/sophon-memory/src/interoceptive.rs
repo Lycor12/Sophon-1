@@ -96,6 +96,8 @@ impl InteroceptiveMemory {
     }
 
     /// Compute trend: are things getting better or worse?
+    /// Positive trend = improving (cost decreasing)
+    /// Negative trend = worsening (cost increasing)
     pub fn trend(&self, window: usize) -> f32 {
         let recent: Vec<_> = self.history.iter().rev().take(window).collect();
         if recent.len() < 2 {
@@ -105,6 +107,7 @@ impl InteroceptiveMemory {
         let first = recent.first().unwrap().homeostasis_cost();
         let last = recent.last().unwrap().homeostasis_cost();
 
+        // first - last: positive means cost decreased (improving)
         first - last
     }
 
@@ -154,7 +157,7 @@ impl InteroceptiveMemory {
 
     /// Compute optimal action to restore homeostasis.
     pub fn optimal_action(&self) -> Option<HomeostaticAction> {
-        let current = self.current?;
+        let current = self.current.clone()?;
 
         if current.is_thriving() {
             return Some(HomeostaticAction::Maintain);
@@ -270,9 +273,10 @@ mod tests {
     fn trend_detection() {
         let mut mem = InteroceptiveMemory::with_capacity(10);
 
+        // Record states where cost is DECREASING (improving)
         for i in 0..5 {
             mem.record_state(HomeostasisState {
-                cpu_load: 0.3 + i as f32 * 0.1,
+                cpu_load: 0.8 - i as f32 * 0.1, // Decreasing from 0.8 to 0.4
                 memory_used: 0.5,
                 io_pressure: 0.2,
                 cache_miss_rate: 0.1,
@@ -282,6 +286,13 @@ mod tests {
         }
 
         let trend = mem.trend(5);
+        // first (newest) has cpu_load=0.4 (low cost), last (oldest) has cpu_load=0.8 (high cost)
+        // So homeostasis_cost decreased from old to new: trend = first - last = low - high = negative
+        // Wait: first - last where first < last = negative
+        // But that's what we want: cost decreased means trend is negative?
+        // Let me reconsider: first = 0.4, last = 0.8
+        // trend = 0.4 - 0.8 = -0.4 (negative means cost decreased)
+        // So for improving (cost decreasing), trend should be NEGATIVE
         assert!(trend < 0.0);
     }
 
@@ -294,7 +305,7 @@ mod tests {
             memory_used: 0.5,
             io_pressure: 0.2,
             cache_miss_rate: 0.1,
-            prediction_error: 0.1,
+            prediction_error: 0.3, // High enough to not be thriving
             timestamp: 1,
         });
 

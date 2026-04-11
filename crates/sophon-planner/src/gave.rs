@@ -7,13 +7,10 @@
 use sophon_config::HDC_DIM;
 use sophon_core::hdc::l2_normalize;
 
-/// A claim/assertion made by the system.
-#[derive(Debug, Clone)]
-pub struct Assertion {
-    pub claim: String,
-    pub evidence: EvidenceChain,
-    pub confidence: f32, // 0-1, computed from evidence
-    pub verification_status: VerificationStatus,
+fn l2_normalize_vec(v: &[f32]) -> Vec<f32> {
+    let mut result = v.to_vec();
+    l2_normalize(&mut result);
+    result
 }
 
 /// Status of verification for an assertion.
