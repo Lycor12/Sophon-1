@@ -64,9 +64,7 @@ fn compute_kernel(
         kernel.push(k_t);
 
         // s = A_bar * s (apply discretised state transition)
-        let mut s_new = vec![0.0f32; SSM_N];
-        disc.apply_a_bar(&s, &mut s_new);
-        s = s_new;
+        s = disc.apply_a_bar(&s);
     }
 
     kernel
@@ -94,17 +92,17 @@ fn causal_conv_1d(k: &[f32], u: &[f32]) -> Vec<f32> {
     u_padded[..t].copy_from_slice(u);
 
     // FFT both
-    let k_freq = fft_real(&k_padded);
-    let u_freq = fft_real(&u_padded);
+    let k_freq = fft_real(&k_padded, fft_len);
+    let u_freq = fft_real(&u_padded, fft_len);
 
     // Pointwise multiply in frequency domain
-    let mut y_freq = Vec::with_capacity(k_freq.len());
+    let mut y_freq: Vec<Complex> = Vec::with_capacity(k_freq.len());
     for i in 0..k_freq.len() {
         y_freq.push(k_freq[i].mul(u_freq[i]));
     }
 
     // IFFT
-    let y_padded = ifft_real(&y_freq, fft_len);
+    let y_padded = ifft_real(&mut y_freq);
 
     // Take first T elements (causal part)
     y_padded[..t].to_vec()

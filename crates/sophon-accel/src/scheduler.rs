@@ -71,7 +71,7 @@ impl ThreadPool {
     /// Blocks until all iterations complete.
     pub fn parallel_for<F>(&self, n: usize, f: F)
     where
-        F: Fn(usize) + Send + Sync,
+        F: Fn(usize) + Send + Sync + 'static,
     {
         if n == 0 {
             return;
@@ -128,9 +128,9 @@ impl ThreadPool {
     /// `identity` is the neutral element. `combine` merges two partial results.
     pub fn parallel_reduce<T, F, C>(&self, n: usize, identity: T, f: F, combine: C) -> T
     where
-        T: Send + Clone + 'static,
-        F: Fn(usize) -> T + Send + Sync,
-        C: Fn(T, T) -> T + Send + Sync,
+        T: Send + Sync + Clone + 'static,
+        F: Fn(usize) -> T + Send + Sync + 'static,
+        C: Fn(T, T) -> T + Send + Sync + 'static,
     {
         if n == 0 {
             return identity;
