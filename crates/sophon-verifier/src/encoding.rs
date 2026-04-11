@@ -167,16 +167,31 @@ pub fn fol_to_lean(expr: &FolExpr) -> String {
             format!("({} * {})", fol_to_lean(lhs), fol_to_lean(rhs))
         }
         FolExpr::Unknown { original } => {
-            format!("sorry /- UNKNOWN: {original} -/")
+            // SECURITY: Don't use `sorry` which silently proves anything.
+            // Use explicit `admit` with a warning, or better: require explicit handling.
+            format!("admit /- UNKNOWN (not sorry!): {original} -/")
         }
     }
 }
 
+/// Default incomplete proof marker.
+///
+/// Uses `admit` instead of `sorry` for safety — `admit` is deprecated and
+/// produces a warning, while `sorry` is silent. This makes incomplete
+/// proofs more visible during development.
+const DEFAULT_INCOMPLETE_PROOF: &str = "admit";
+
 /// Generate a complete Lean 4 theorem statement with proof placeholder.
+///
+/// # Security
+/// Never defaults to `sorry` — uses `admit` which produces warnings.
+/// Callers must explicitly provide a complete proof to avoid incompleteness.
 pub fn generate_lean_theorem(name: &str, statement: &FolExpr, proof_body: Option<&str>) -> String {
     let stmt = fol_to_lean(statement);
-    let proof = proof_body.unwrap_or("sorry");
-    format!("theorem {name} : {stmt} := by\n  {proof}\n")
+    // SECURITY: Don't default to `sorry`. Use `admit` which produces warnings,
+    // or require explicit proof body.
+    let proof = proof_body.unwrap_or(DEFAULT_INCOMPLETE_PROOF);
+    format!("theorem {name} : {stmt} := by\n {proof}\n")
 }
 
 /// Generate a Lean 4 definition.

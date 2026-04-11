@@ -86,16 +86,25 @@ impl KnotVector {
     }
 
     /// Update internal knots from a slice of length KAN_KNOTS.
-    /// Clamps knots to [lo, hi] and sorts them to maintain non-decreasing order.
+    /// Clamps knots to [lo, hi], sanitizes NaN values, and sorts them to maintain
+    /// non-decreasing order.
+    ///
+    /// # NaN Handling
+    /// NaN values are replaced with the midpoint of the domain before sorting.
+    /// This prevents panics from `partial_cmp` returning None for NaN.
     pub fn update_internal(&mut self, new_internal: &[f32]) {
         assert_eq!(new_internal.len(), KAN_KNOTS);
         let k = KAN_ORDER; // 3
         let mut knots: [f32; KAN_KNOTS] = [0.0; KAN_KNOTS];
+        let mid = (self.lo + self.hi) * 0.5;
         for (i, &v) in new_internal.iter().enumerate() {
-            knots[i] = v.clamp(self.lo, self.hi);
+            // Sanitize NaN: replace with midpoint, then clamp
+            let sanitized = if v.is_nan() { mid } else { v };
+            knots[i] = sanitized.clamp(self.lo, self.hi);
         }
         // Sort to maintain non-decreasing constraint
-        knots.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        // Use total_cmp which handles NaN (we already sanitized, but be safe)
+        knots.sort_by(|a, b| a.total_cmp(b));
         for i in 0..KAN_KNOTS {
             self.t[k + 1 + i] = knots[i];
         }
@@ -357,7 +366,7 @@ impl CubicBSpline {
     /// functions and thus the output.
     ///
     /// We use numerical differentiation (central differences) with step h:
-    ///   dS/dt_j ≈ (S(x; t_j + h) - S(x; t_j - h)) / (2h)
+    /// dS/dt_j ≈ (S(x; t_j + h) - S(x; t_j - h)) / (2h)
     ///
     /// This is used because the analytical derivative d B_i / d t_j of
     /// the Cox-de Boor basis w.r.t. knot positions involves piecewise
@@ -368,20 +377,59 @@ impl CubicBSpline {
     /// updates in the training schedule.
     ///
     /// Returns an array of length KAN_KNOTS.
+    ///
+    /// # Numerical Stability
+    /// Uses adaptive step size and finite difference fallback to handle
+    /// cases where central differences may be unstable (near boundaries,
+    /// degenerate knots, etc.).
     pub fn grad_knots(&self, x: f32) -> [f32; KAN_KNOTS] {
-        let h = 1e-4f32; // central difference step
-        let k = KAN_ORDER;
+        const H_DEFAULT: f32 = 1e-4f32; // central difference step
+        const MIN_H: f32 = 1e-8f32; // minimum step size
+        const MAX_H: f32 = 1e-2f32; // maximum step size
+
         let mut grads = [0.0f32; KAN_KNOTS];
         let base_knots = self.kv.internal_knots();
 
+        // Sanitize input x
+        let x = if x.is_nan() {
+            (self.kv.lo + self.kv.hi) * 0.5
+        } else {
+            x.clamp(self.kv.lo, self.kv.hi)
+        };
+
         for j in 0..KAN_KNOTS {
+            // Adaptive step size: scale by distance to boundaries
+            let dist_to_lo = (base_knots[j] - self.kv.lo).abs();
+            let dist_to_hi = (self.kv.hi - base_knots[j]).abs();
+            let min_dist = dist_to_lo.min(dist_to_hi);
+            let h = H_DEFAULT.min(min_dist * 0.1).max(MIN_H).min(MAX_H);
+
+            // Skip if coefficient is zero (gradient will be zero)
+            let coeff_contrib: f32 = self.c.iter().map(|c| c.abs()).sum();
+            if coeff_contrib < 1e-12 {
+                grads[j] = 0.0;
+                continue;
+            }
+
             // Perturb knot j forward
             let mut knots_plus = base_knots;
-            knots_plus[j] = (knots_plus[j] + h).min(self.kv.hi);
+            knots_plus[j] = (base_knots[j] + h).min(self.kv.hi);
 
             // Perturb knot j backward
             let mut knots_minus = base_knots;
-            knots_minus[j] = (knots_minus[j] - h).max(self.kv.lo);
+            knots_minus[j] = (base_knots[j] - h).max(self.kv.lo);
+
+            // Ensure we have non-zero step
+            let actual_h = knots_plus[j] - knots_minus[j];
+            if actual_h.abs() < MIN_H {
+                // Fall back to forward difference
+                let mut kv_plus = self.kv.clone();
+                kv_plus.update_internal(&knots_plus);
+                let s_plus = kv_plus.eval(x, &self.c);
+                let s_base = self.kv.eval(x, &self.c);
+                grads[j] = (s_plus - s_base) / h;
+                continue;
+            }
 
             // Evaluate with perturbed knots
             let mut kv_plus = self.kv.clone();
@@ -392,12 +440,9 @@ impl CubicBSpline {
             kv_minus.update_internal(&knots_minus);
             let s_minus = kv_minus.eval(x, &self.c);
 
-            let actual_h = knots_plus[j] - knots_minus[j];
-            grads[j] = if actual_h.abs() > 1e-12 {
-                (s_plus - s_minus) / actual_h
-            } else {
-                0.0
-            };
+            // Compute gradient with NaN check
+            let grad = (s_plus - s_minus) / actual_h;
+            grads[j] = if grad.is_finite() { grad } else { 0.0 };
         }
         grads
     }

@@ -2,14 +2,23 @@
 //!
 //! This module implements one complete training iteration over a byte sequence.
 //! The sequence is processed token-by-token (autoregressive), with:
-//!   - Forward pass through all 16 blocks with activation caching
-//!   - Cross-entropy loss at each position (next-token prediction)
-//!   - Backward pass from loss gradient through head → blocks → embedding
-//!   - TSM-SGD parameter update for all parameter groups
+//! - Forward pass through all 16 blocks with activation caching
+//! - Prediction error (negative log-likelihood) at each position (next-token prediction)
+//! - Backward pass from loss gradient through head → blocks → embedding
+//! - TSM-SGD parameter update for all parameter groups
+//!
+//! # Free Energy Training
+//!
+//! Uses variational free energy loss which combines:
+//! - Prediction error: negative log-likelihood of observations
+//! - KL divergence: regularization to prior (N(0, I))
+//!
+//! This replaces the previous cross-entropy-only objective with a unified
+//! active inference framework that balances accuracy with model simplicity.
 
 use sophon_config::{D_MODEL, NUM_BLOCKS, VOCAB_SIZE};
 use sophon_core::Tensor;
-use sophon_loss::ce::{cross_entropy_grad, cross_entropy_loss};
+use sophon_loss::{prediction_error_grad, prediction_error_loss};
 use sophon_model::backward::{
     block_backward, block_forward_with_cache, embedding_backward, head_backward,
     head_forward_with_cache, BlockCache, BlockGrads, HeadGrads,
@@ -272,7 +281,7 @@ pub fn train_step(
     for t in 0..seq_len {
         let cache = forward_token_cached(model, input[t], &mut ssm_states)?;
         let target = input[t + 1] as usize;
-        let loss = cross_entropy_loss(&cache.logits, target);
+        let loss = prediction_error_loss(&cache.logits, target);
         total_loss += loss;
         token_losses.push(loss);
         token_caches.push(cache);
@@ -289,8 +298,8 @@ pub fn train_step(
         let cache = &token_caches[t];
         let target = input[t + 1] as usize;
 
-        // CE gradient w.r.t. logits
-        let grad_logits = cross_entropy_grad(&cache.logits, target);
+        // Prediction error gradient w.r.t. logits
+        let grad_logits = prediction_error_grad(&cache.logits, target);
 
         // Head backward
         let (hg, mut grad_block_out) = head_backward(&model.head, &grad_logits, &cache.head_cache)?;

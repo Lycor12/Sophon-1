@@ -79,6 +79,12 @@ pub enum LeanErrorKind {
     Timeout { elapsed: Duration },
     /// Process could not be spawned (lean not installed).
     ProcessSpawnFailed { reason: String },
+    /// CRITICAL: Proof uses `sorry` axiom — incomplete but type-checks.
+    /// This is a security vulnerability: `sorry` proves anything.
+    SorryAxiom {
+        line: Option<usize>,
+        message: String,
+    },
     /// Unclassified error.
     Other { message: String },
 }
@@ -119,6 +125,16 @@ impl core::fmt::Display for LeanErrorKind {
             }
             Self::ProcessSpawnFailed { reason } => {
                 write!(f, "could not spawn lean: {reason}")
+            }
+            Self::SorryAxiom { line, message } => {
+                if let Some(l) = line {
+                    write!(
+                        f,
+                        "incomplete proof at line {l}: uses 'sorry' axiom: {message}"
+                    )
+                } else {
+                    write!(f, "incomplete proof: uses 'sorry' axiom: {message}")
+                }
             }
             Self::Other { message } => write!(f, "{message}"),
         }
@@ -414,12 +430,50 @@ impl LeanBackend {
     }
 
     /// Parse Lean error output into classified errors — LCPE.
+    ///
+    /// # Security Note
+    /// This function detects `sorry` axioms which are type-safe but logically
+    /// invalid — they prove anything. A proof containing `sorry` must be
+    /// rejected even if Lean reports success.
     fn parse_errors(stderr: &str) -> Vec<LeanErrorKind> {
         let mut errors = Vec::new();
+
+        // First pass: scan for `sorry` in the source (even without explicit error)
+        for (line_num, line) in stderr.lines().enumerate() {
+            let line_lower = line.to_lowercase();
+            if line_lower.contains("sorry") {
+                // Check if it's actually a sorry warning or usage
+                if line_lower.contains("declaration uses 'sorry'")
+                    || line_lower.contains("uses 'sorry'")
+                {
+                    errors.push(LeanErrorKind::SorryAxiom {
+                        line: Some(line_num + 1),
+                        message: "Proof uses sorry axiom".to_string(),
+                    });
+                } else if line_lower.contains("sorry") && line_lower.contains("axiom") {
+                    errors.push(LeanErrorKind::SorryAxiom {
+                        line: Some(line_num + 1),
+                        message: line.trim().to_string(),
+                    });
+                }
+            }
+        }
 
         for line in stderr.lines() {
             let line = line.trim();
             if line.is_empty() {
+                continue;
+            }
+
+            // CRITICAL SECURITY CHECK: Detect sorry in any context
+            let line_lower = line.to_lowercase();
+            if line_lower.contains("sorry") {
+                // Extract line number if available
+                let line_num = Self::extract_line_col(line).map(|(l, _)| l);
+                errors.push(LeanErrorKind::SorryAxiom {
+                    line: line_num,
+                    message: "Proof contains sorry axiom".to_string(),
+                });
                 continue;
             }
 
@@ -482,6 +536,36 @@ impl LeanBackend {
         }
 
         errors
+    }
+
+    /// Check if Lean source code contains `sorry` axiom.
+    ///
+    /// This is a pre-compilation security check. `sorry` is a dangerous axiom
+    /// that proves any proposition, making proofs mathematically meaningless.
+    ///
+    /// # Arguments
+    /// * `source` — the Lean source code to scan
+    ///
+    /// # Returns
+    /// `Some(line_number)` if sorry is found, `None` otherwise
+    pub fn detect_sorry(source: &str) -> Option<usize> {
+        for (line_num, line) in source.lines().enumerate() {
+            // Look for sorry as a standalone token (not inside comments or strings)
+            // This is a simplified check - full parsing would be more robust
+            let trimmed = line.trim();
+            if trimmed.starts_with("/-") || trimmed.starts_with("--") {
+                continue; // Skip comment lines
+            }
+            // Check for sorry outside of comments
+            if let Some(pos) = line.find("sorry") {
+                // Verify it's not inside a comment
+                let before = &line[..pos];
+                if !before.contains("--") && !before.contains("/-") {
+                    return Some(line_num + 1);
+                }
+            }
+        }
+        None
     }
 
     /// Extract the portion after "error:" in a line.
@@ -651,5 +735,61 @@ mod tests {
         backend.total_attempts = 10;
         backend.total_successes = 7;
         assert!((backend.success_rate() - 0.7).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_errors_detects_sorry_in_source() {
+        // Test that sorry in stderr is detected
+        let stderr = "theorem test : True := by sorry";
+        let errors = LeanBackend::parse_errors(stderr);
+        assert!(!errors.is_empty());
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, LeanErrorKind::SorryAxiom { .. })));
+    }
+
+    #[test]
+    fn parse_errors_detects_sorry_warning() {
+        // Lean produces warnings like "declaration uses 'sorry'"
+        let stderr = "test.lean:5:0: warning: declaration uses 'sorry'";
+        let errors = LeanBackend::parse_errors(stderr);
+        assert!(!errors.is_empty());
+        assert!(errors
+            .iter()
+            .any(|e| matches!(e, LeanErrorKind::SorryAxiom { .. })));
+    }
+
+    #[test]
+    fn detect_sorry_finds_explicit_sorry() {
+        let source = "theorem test : 1 + 1 = 2 := by sorry";
+        let line = LeanBackend::detect_sorry(source);
+        assert_eq!(line, Some(1), "Should detect sorry on line 1");
+    }
+
+    #[test]
+    fn detect_sorry_ignores_comments() {
+        let source = "-- this is a sorry in a comment\ntheorem test : True := rfl";
+        let line = LeanBackend::detect_sorry(source);
+        assert_eq!(line, None, "Should ignore sorry in comments");
+    }
+
+    #[test]
+    fn detect_sorry_in_multiline_source() {
+        let source = r#"theorem test : True := by
+  have h := sorry
+  exact h"#;
+        let line = LeanBackend::detect_sorry(source);
+        assert_eq!(line, Some(2), "Should detect sorry on line 2");
+    }
+
+    #[test]
+    fn sorry_axiom_display_format() {
+        let err = LeanErrorKind::SorryAxiom {
+            line: Some(5),
+            message: "Test message".to_string(),
+        };
+        let display = format!("{err}");
+        assert!(display.contains("sorry"));
+        assert!(display.contains("line 5"));
     }
 }
