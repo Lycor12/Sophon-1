@@ -1,0 +1,18 @@
+[package]
+name = "sophon-swarm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Swarm classroom orchestration for Sophon-1 training"
+
+[dependencies]
+sophon-config = { path = "../sophon-config" }
+sophon-core = { path = "../sophon-core" }
+sophon-model = { path = "../sophon-model" }
+sophon-train = { path = "../sophon-train" }
+sophon-verifier = { path = "../sophon-verifier" }
+sophon-optim = { path = "../sophon-optim" }
+sophon-loss = { path = "../sophon-loss" }
+sophon-kan = { path = "../sophon-kan" }
+sophon-ssm = { path = "../sophon-ssm" }

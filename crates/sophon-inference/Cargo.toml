@@ -1,0 +1,10 @@
+[package]
+name = "sophon-inference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sophon-config = { path = "../sophon-config" }
+sophon-core   = { path = "../sophon-core" }
+sophon-loss   = { path = "../sophon-loss" }

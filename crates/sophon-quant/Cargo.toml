@@ -1,0 +1,11 @@
+[package]
+name = "sophon-quant"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sophon-config = { path = "../sophon-config" }
+sophon-core   = { path = "../sophon-core" }
+sophon-ssm    = { path = "../sophon-ssm" }
+sophon-kan    = { path = "../sophon-kan" }

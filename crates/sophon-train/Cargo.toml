@@ -1,0 +1,15 @@
+[package]
+name = "sophon-train"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sophon-config   = { path = "../sophon-config" }
+sophon-core     = { path = "../sophon-core" }
+sophon-kan      = { path = "../sophon-kan" }
+sophon-ssm      = { path = "../sophon-ssm" }
+sophon-model    = { path = "../sophon-model" }
+sophon-optim    = { path = "../sophon-optim" }
+sophon-loss     = { path = "../sophon-loss" }
+sophon-verifier = { path = "../sophon-verifier" }

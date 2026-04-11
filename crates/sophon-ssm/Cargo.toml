@@ -1,0 +1,9 @@
+[package]
+name = "sophon-ssm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+sophon-config = { path = "../sophon-config" }
+sophon-core   = { path = "../sophon-core" }

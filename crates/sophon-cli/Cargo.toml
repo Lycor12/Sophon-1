@@ -1,0 +1,19 @@
+[package]
+name = "sophon-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "sophon"
+path = "src/main.rs"
+
+[dependencies]
+sophon-config   = { path = "../sophon-config" }
+sophon-core     = { path = "../sophon-core" }
+sophon-model    = { path = "../sophon-model" }
+sophon-runtime  = { path = "../sophon-runtime" }
+sophon-verifier = { path = "../sophon-verifier" }
+sophon-safety   = { path = "../sophon-safety" }
+sophon-inference = { path = "../sophon-inference" }
+sophon-quant    = { path = "../sophon-quant" }

@@ -1,0 +1,11 @@
+[package]
+name = "sophon-data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Data pipeline and corpus loading for Sophon-1 training"
+
+[dependencies]
+sophon-config = { path = "../sophon-config" }
+sophon-core = { path = "../sophon-core" }

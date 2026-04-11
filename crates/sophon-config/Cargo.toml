@@ -1,0 +1,7 @@
+[package]
+name = "sophon-config"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
