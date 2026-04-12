@@ -109,7 +109,7 @@ pub trait Hook: 'static {
 /// use_state hook - returns a value and setter function
 pub fn use_state<T: Clone + 'static>(initial: T) -> (T, impl Fn(T)) {
     let idx = HOOKS.with(|h| {
-        let mut hooks = h.borrow_mut();
+        let hooks = h.borrow_mut();
         hooks.next_index()
     });
 
@@ -161,7 +161,7 @@ pub fn use_ref<T: Clone + 'static>(initial: T) -> RefCell<T> {
 
     if needs_init {
         HOOKS.with(|h| {
-            let hooks = h.borrow_mut();
+            let mut hooks = h.borrow_mut();
             hooks
                 .states
                 .push(HookState::Ref(Box::new(RefCell::new(initial))));
@@ -276,12 +276,15 @@ mod tests {
         // Access the state again - note: in real usage, you'd call
         // use_state at the same position in the component each render
         // Here we verify the hook storage was updated
-        let hooks = HOOKS.with(|h| h.borrow());
-        if let HookState::State(val) = &hooks.states[0] {
-            let stored: &i32 = val.downcast_ref().unwrap();
-            assert_eq!(*stored, 5);
-        } else {
-            panic!("Expected State hook at index 0");
-        }
+        let stored_value = HOOKS.with(|h| {
+            let hooks = h.borrow();
+            if let HookState::State(val) = &hooks.states[0] {
+                let stored: &i32 = val.downcast_ref().unwrap();
+                Some(*stored)
+            } else {
+                None
+            }
+        });
+        assert_eq!(stored_value, Some(5));
     }
 }

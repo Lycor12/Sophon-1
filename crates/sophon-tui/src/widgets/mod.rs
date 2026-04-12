@@ -43,7 +43,7 @@ pub trait StatefulWidget {
 
 /// Helper function to create a styled box with border
 pub fn styled_box(
-    title: impl Into<String>,
+    _title: impl Into<String>,
     content: crate::element::Element,
     style: crate::style::Style,
 ) -> crate::element::Element {
@@ -67,8 +67,8 @@ pub fn centered(
     use crate::element::{Element, ElementKind};
 
     let element_size = element.min_size();
-    let x = (container_size.width - element_size.width) / 2;
-    let y = (container_size.height - element_size.height) / 2;
+    let _x = (container_size.width - element_size.width) / 2;
+    let _y = (container_size.height - element_size.height) / 2;
 
     Element::row(vec![
         Element {

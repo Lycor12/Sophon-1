@@ -165,7 +165,7 @@ impl Chart {
 
         let mut lines = Vec::new();
         let chart_height = area.height.saturating_sub(2);
-        let chart_width = area.width.saturating_sub(4);
+        let _chart_width = area.width.saturating_sub(4);
 
         // Find global range
         let mut global_min = f64::INFINITY;
@@ -175,7 +175,7 @@ impl Chart {
             global_min = global_min.min(min);
             global_max = global_max.max(max);
         }
-        let range = (global_max - global_max).max(1.0);
+        let range = (global_max - global_min).max(1.0);
 
         // Render bars
         for row in 0..chart_height {
@@ -185,7 +185,7 @@ impl Chart {
                     continue;
                 }
                 let bar_height = ((ds.data[0] - global_min) / range * chart_height as f64) as usize;
-                if chart_height.saturating_sub(row) <= bar_height {
+                if (chart_height.saturating_sub(row) as usize) <= bar_height {
                     line.push(ds.symbol);
                 } else {
                     line.push(' ');
@@ -229,7 +229,7 @@ impl Chart {
         let range = (global_max - global_min).max(1.0);
 
         // Build grid
-        let mut grid = vec![vec![' '; chart_width]; chart_height];
+        let mut grid = vec![vec![' '; chart_width as usize]; chart_height as usize];
 
         for ds in &self.datasets {
             let points: Vec<(usize, usize)> = ds
@@ -237,11 +237,11 @@ impl Chart {
                 .iter()
                 .enumerate()
                 .filter_map(|(i, &v)| {
-                    let x = (i * chart_width) / ds.data.len().max(1);
-                    let y = chart_height.saturating_sub(1)
+                    let x = (i * chart_width as usize) / ds.data.len().max(1);
+                    let y = (chart_height.saturating_sub(1) as usize)
                         - ((v - global_min) / range * (chart_height.saturating_sub(1)) as f64)
                             as usize;
-                    if x < chart_width && y < chart_height {
+                    if x < chart_width as usize && y < chart_height as usize {
                         Some((x, y))
                     } else {
                         None
@@ -306,7 +306,7 @@ impl Chart {
         let chart_height = area.height.saturating_sub(2);
         let chart_width = area.width.saturating_sub(4);
 
-        let mut grid = vec![vec![' '; chart_width]; chart_height];
+        let mut grid = vec![vec![' '; chart_width as usize]; chart_height as usize];
 
         for ds in &self.datasets {
             let x_range = ds.data.len() as f64;
@@ -315,9 +315,9 @@ impl Chart {
 
             for (i, &v) in ds.data.iter().enumerate() {
                 let x = ((i as f64 / x_range) * (chart_width.saturating_sub(1)) as f64) as usize;
-                let y = chart_height.saturating_sub(1)
+                let y = (chart_height.saturating_sub(1) as usize)
                     - (((v - y_min) / y_range) * (chart_height.saturating_sub(1)) as f64) as usize;
-                if x < chart_width && y < chart_height {
+                if x < chart_width as usize && y < chart_height as usize {
                     grid[y][x] = '●';
                 }
             }

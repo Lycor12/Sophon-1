@@ -511,7 +511,7 @@ mod tests {
         assert_eq!(status.spinner.frame, frame_before + 1);
 
         // Should not tick if not loading
-        status.set_state(SpinnerState::Success("Done"));
+        status.set_state(SpinnerState::Success("Done".to_string()));
         let frame_before = status.spinner.frame;
         status.tick();
         assert_eq!(status.spinner.frame, frame_before);
@@ -520,7 +520,7 @@ mod tests {
     #[test]
     fn status_spinner_set_state() {
         let mut status = StatusSpinner::new("Loading");
-        status.set_state(SpinnerState::Success("Done"));
+        status.set_state(SpinnerState::Success("Done".to_string()));
         assert!(status.state.is_success());
     }
 

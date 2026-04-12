@@ -1,7 +1,7 @@
 //! List widget for displaying scrollable items
 
 use crate::element::{Element, ElementKind};
-use crate::layout::{Constraint, Rect, Size};
+use crate::layout::{Rect, Size};
 use crate::style::{Color, Style};
 use crate::widgets::Widget;
 
@@ -179,6 +179,7 @@ impl Widget for List {
             children.push(el);
         }
 
+        let height = children.len() as u16;
         Element {
             id: None,
             kind: ElementKind::Column,
@@ -188,7 +189,7 @@ impl Widget for List {
                 x: area.x,
                 y: area.y,
                 width: (max_width + self.start_symbol.len() + self.end_symbol.len()) as u16,
-                height: children.len() as u16,
+                height,
             }),
         }
     }
@@ -197,7 +198,7 @@ impl Widget for List {
         let max_width = self.items.iter().map(|s| s.len()).max().unwrap_or(0);
         Size {
             width: max_width + self.start_symbol.len() + self.end_symbol.len(),
-            height: self.items.len().min(10).into(),
+            height: self.items.len().min(10),
         }
     }
 }

@@ -247,7 +247,7 @@ impl Table {
             for (i, cell) in row.cells.iter().enumerate().take(num_cols) {
                 if i < num_cols {
                     match self.columns[i].width {
-                        Constraint::Length(n) => {} // Fixed, don't change
+                        Constraint::Length(_n) => {} // Fixed, don't change
                         Constraint::Min(n) => widths[i] = widths[i].max(cell.len().max(n as usize)),
                         Constraint::Max(n) => widths[i] = widths[i].max(cell.len()).min(n as usize),
                         _ => widths[i] = widths[i].max(cell.len()),
@@ -261,7 +261,7 @@ impl Table {
 }
 
 impl Widget for Table {
-    fn render(&self, area: Rect) -> Element {
+    fn render(&self, _area: Rect) -> Element {
         let widths = self.calculate_widths();
         let num_cols = self.columns.len();
 

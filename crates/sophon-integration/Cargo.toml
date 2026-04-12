@@ -6,3 +6,24 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+sophon-accel = { path = "../sophon-accel" }
+sophon-config = { path = "../sophon-config" }
+sophon-core = { path = "../sophon-core" }
+sophon-data = { path = "../sophon-data" }
+sophon-eval = { path = "../sophon-eval" }
+sophon-inference = { path = "../sophon-inference" }
+sophon-kan = { path = "../sophon-kan" }
+sophon-loss = { path = "../sophon-loss" }
+sophon-memory = { path = "../sophon-memory" }
+sophon-model = { path = "../sophon-model" }
+sophon-optim = { path = "../sophon-optim" }
+sophon-quant = { path = "../sophon-quant" }
+sophon-runtime = { path = "../sophon-runtime" }
+sophon-safety = { path = "../sophon-safety" }
+sophon-ssm = { path = "../sophon-ssm" }
+sophon-train = { path = "../sophon-train" }
+sophon-tui = { path = "../sophon-tui" }
+sophon-verifier = { path = "../sophon-verifier" }
+
+[dev-dependencies]
+rand = "0.8"

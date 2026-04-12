@@ -28,6 +28,21 @@ pub struct Document {
 }
 
 impl Document {
+    /// Create a new document from id and content.
+    /// Note: This API is primarily for testing. The internal representation
+    /// uses bytes/source/index for corpus reading efficiency.
+    pub fn new(id: impl Into<String>, content: impl Into<String>) -> Self {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static INDEX: AtomicUsize = AtomicUsize::new(0);
+
+        let content_str: String = content.into();
+        Self {
+            bytes: content_str.into_bytes(),
+            source: id.into(),
+            index: INDEX.fetch_add(1, Ordering::SeqCst),
+        }
+    }
+
     /// Byte length.
     pub fn len(&self) -> usize {
         self.bytes.len()
@@ -41,6 +56,16 @@ impl Document {
     /// Try to interpret as UTF-8.
     pub fn as_text(&self) -> Option<&str> {
         std::str::from_utf8(&self.bytes).ok()
+    }
+
+    /// Get the document ID (alias for source).
+    pub fn id(&self) -> &str {
+        &self.source
+    }
+
+    /// Get the document content as a string (lossy conversion).
+    pub fn content(&self) -> String {
+        String::from_utf8_lossy(&self.bytes).to_string()
     }
 
     /// Byte-level entropy estimate (Shannon entropy over byte histogram).
