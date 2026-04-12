@@ -148,6 +148,7 @@ dependencies = [
  "sophon-runtime",
  "sophon-safety",
  "sophon-train",
+ "sophon-tui",
  "sophon-verifier",
 ]
 

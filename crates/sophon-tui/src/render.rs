@@ -164,28 +164,56 @@ impl ToString for RenderBuffer {
 
 /// Render an element to a buffer (public for advanced use)
 pub fn render_element(element: &Element, buffer: &mut RenderBuffer, area: Rect, style: Style) {
-    match element {
-        Element::Empty => {}
-        Element::Text {
-            content,
-            style: text_style,
-        } => {
-            let combined_style = style.combine(*text_style);
+    use crate::element::ElementKind;
+
+    match &element.kind {
+        ElementKind::Text(content) => {
+            let combined_style = style.combine(element.style);
             render_text(buffer, area, content, combined_style);
         }
-        Element::Container {
-            children,
-            layout,
-            style: container_style,
-        } => {
-            let combined_style = style.combine(*container_style);
-            let child_areas = layout.calculate(area, children.len() as u16);
-            for (child, child_area) in children.iter().zip(child_areas.iter()) {
-                render_element(child, buffer, *child_area, combined_style);
+        ElementKind::Column | ElementKind::Row => {
+            let combined_style = style.combine(element.style);
+            // Simple layout: just render children sequentially
+            for child in &element.children {
+                render_element(child, buffer, area, combined_style);
             }
         }
-        Element::Box { style: box_style } => {
-            render_box(buffer, area, *box_style);
+        ElementKind::Box => {
+            // Just render the single child
+            if let Some(child) = element.children.first() {
+                render_element(child, buffer, area, style);
+            }
+        }
+        ElementKind::Border(border_style) => {
+            render_box(buffer, area, *border_style);
+            // Render children inside the box
+            let inner_area = Rect::new(
+                area.x + 1,
+                area.y + 1,
+                area.width.saturating_sub(2),
+                area.height.saturating_sub(2),
+            );
+            for child in &element.children {
+                render_element(child, buffer, inner_area, style);
+            }
+        }
+        ElementKind::Button { label, .. } => {
+            // Render button with brackets
+            let combined_style = style.combine(element.style);
+            let button_text = format!("[ {} ]", label);
+            render_text(buffer, area, &button_text, combined_style);
+        }
+        ElementKind::Input { value, placeholder } => {
+            let combined_style = style.combine(element.style);
+            let display_text = if value.is_empty() {
+                placeholder.clone()
+            } else {
+                value.clone()
+            };
+            render_text(buffer, area, &display_text, combined_style);
+        }
+        ElementKind::Spacer | ElementKind::Component { .. } | ElementKind::Scroll { .. } => {
+            // Nothing to render
         }
     }
 }
@@ -218,10 +246,12 @@ fn render_box(buffer: &mut RenderBuffer, area: Rect, style: crate::style::Border
 
     let (h, v, tl, tr, bl, br) = match style {
         BorderStyle::None => return,
-        BorderStyle::Plain => ('─', '│', '┌', '┐', '└', '┘'),
+        BorderStyle::Single => ('─', '│', '┌', '┐', '└', '┘'),
         BorderStyle::Rounded => ('─', '│', '╭', '╮', '╰', '╯'),
         BorderStyle::Double => ('═', '║', '╔', '╗', '╚', '╝'),
         BorderStyle::Thick => ('━', '┃', '┏', '┓', '┗', '┛'),
+        BorderStyle::Dashed => ('┄', '┆', '┌', '┐', '└', '┘'),
+        BorderStyle::Dotted => ('┈', '┊', '┌', '┐', '└', '┘'),
     };
 
     // Top border
@@ -256,9 +286,9 @@ fn render_box(buffer: &mut RenderBuffer, area: Rect, style: crate::style::Border
 
 /// Measure text size
 pub fn measure_text(text: &str) -> Size {
-    let mut width = 0u16;
-    let mut height = 1u16;
-    let mut current_width = 0u16;
+    let mut width = 0usize;
+    let mut height = 1usize;
+    let mut current_width = 0usize;
 
     for ch in text.chars() {
         if ch == '\n' {

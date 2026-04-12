@@ -250,6 +250,22 @@ impl Style {
         }
     }
 
+    /// Combine with another style (same as merge but takes ownership)
+    pub fn combine(self, other: Style) -> Style {
+        Style {
+            fg: other.fg.or(self.fg),
+            bg: other.bg.or(self.bg),
+            bold: other.bold || self.bold,
+            dim: other.dim || self.dim,
+            italic: other.italic || self.italic,
+            underline: other.underline || self.underline,
+            blink: other.blink || self.blink,
+            reverse: other.reverse || self.reverse,
+            hidden: other.hidden || self.hidden,
+            strikethrough: other.strikethrough || self.strikethrough,
+        }
+    }
+
     // Builder methods
     pub fn fg(mut self, color: Color) -> Self {
         self.fg = Some(color);

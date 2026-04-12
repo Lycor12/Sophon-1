@@ -63,11 +63,13 @@ pub use terminal::{Capabilities, Terminal, TerminalBuffer};
 
 /// Re-export commonly used functions
 pub mod prelude {
-    pub use crate::element::Element;
+    pub use crate::element::{Element, ElementKind};
     pub use crate::layout::{Constraint, Rect};
     pub use crate::render::render_to_string;
     pub use crate::style::{BorderStyle, Color, Style};
 }
+
+pub mod widgets;
 
 /// Current TUI version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

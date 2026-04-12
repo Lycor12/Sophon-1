@@ -12,6 +12,7 @@
 use std::io::{self, Write};
 
 /// Terminal abstraction
+#[derive(Debug)]
 pub struct Terminal {
     /// Current terminal size
     width: u16,

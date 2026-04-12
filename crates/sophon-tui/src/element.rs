@@ -11,7 +11,6 @@ use crate::style::{BorderStyle, Color, Style};
 pub struct ElementId(pub usize);
 
 /// The kind of element - determines rendering behavior
-#[derive(Debug, Clone, PartialEq)]
 pub enum ElementKind {
     /// Text content
     Text(String),
@@ -36,6 +35,83 @@ pub enum ElementKind {
     Spacer,
     /// Custom component
     Component { name: String },
+}
+
+impl std::fmt::Debug for ElementKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ElementKind::Text(s) => f.debug_tuple("Text").field(s).finish(),
+            ElementKind::Box => f.debug_struct("Box").finish(),
+            ElementKind::Column => f.debug_struct("Column").finish(),
+            ElementKind::Row => f.debug_struct("Row").finish(),
+            ElementKind::Border(style) => f.debug_tuple("Border").field(style).finish(),
+            ElementKind::Button { label, .. } => {
+                f.debug_struct("Button").field("label", label).finish()
+            }
+            ElementKind::Input { value, placeholder } => f
+                .debug_struct("Input")
+                .field("value", value)
+                .field("placeholder", placeholder)
+                .finish(),
+            ElementKind::Scroll { offset } => {
+                f.debug_struct("Scroll").field("offset", offset).finish()
+            }
+            ElementKind::Spacer => f.debug_struct("Spacer").finish(),
+            ElementKind::Component { name } => {
+                f.debug_struct("Component").field("name", name).finish()
+            }
+        }
+    }
+}
+
+impl Clone for ElementKind {
+    fn clone(&self) -> Self {
+        match self {
+            ElementKind::Text(s) => ElementKind::Text(s.clone()),
+            ElementKind::Box => ElementKind::Box,
+            ElementKind::Column => ElementKind::Column,
+            ElementKind::Row => ElementKind::Row,
+            ElementKind::Border(style) => ElementKind::Border(*style),
+            ElementKind::Button { label, .. } => ElementKind::Button {
+                label: label.clone(),
+                on_press: None, // Can't clone closures
+            },
+            ElementKind::Input { value, placeholder } => ElementKind::Input {
+                value: value.clone(),
+                placeholder: placeholder.clone(),
+            },
+            ElementKind::Scroll { offset } => ElementKind::Scroll { offset: *offset },
+            ElementKind::Spacer => ElementKind::Spacer,
+            ElementKind::Component { name } => ElementKind::Component { name: name.clone() },
+        }
+    }
+}
+
+impl PartialEq for ElementKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (ElementKind::Text(a), ElementKind::Text(b)) => a == b,
+            (ElementKind::Box, ElementKind::Box) => true,
+            (ElementKind::Column, ElementKind::Column) => true,
+            (ElementKind::Row, ElementKind::Row) => true,
+            (ElementKind::Border(a), ElementKind::Border(b)) => a == b,
+            (ElementKind::Button { label: a, .. }, ElementKind::Button { label: b, .. }) => a == b,
+            (
+                ElementKind::Input {
+                    value: a,
+                    placeholder: ap,
+                },
+                ElementKind::Input {
+                    value: b,
+                    placeholder: bp,
+                },
+            ) => a == b && ap == bp,
+            (ElementKind::Scroll { offset: a }, ElementKind::Scroll { offset: b }) => a == b,
+            (ElementKind::Spacer, ElementKind::Spacer) => true,
+            (ElementKind::Component { name: a }, ElementKind::Component { name: b }) => a == b,
+            _ => false,
+        }
+    }
 }
 
 /// An element in the virtual tree
@@ -336,7 +412,7 @@ mod tests {
     #[test]
     fn bordered_element_size() {
         let inner = Element::text("content");
-        let bordered = Element::border(inner, BorderStyle::Single);
+        let bordered = Element::bordered(inner, BorderStyle::Single);
 
         let size = bordered.min_size();
         assert_eq!(size.width, 9); // 7 + 2 border

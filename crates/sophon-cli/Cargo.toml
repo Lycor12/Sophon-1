@@ -20,3 +20,4 @@ sophon-quant = { path = "../sophon-quant" }
 sophon-data = { path = "../sophon-data" }
 sophon-train = { path = "../sophon-train" }
 sophon-optim = { path = "../sophon-optim" }
+sophon-tui = { path = "../sophon-tui" }

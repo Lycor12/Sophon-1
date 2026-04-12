@@ -21,7 +21,7 @@ pub trait Component: std::fmt::Debug {
     fn mount(&mut self) {}
 
     /// Called before each render
-    fn update(&mut self, props: &dyn std::any::Any) {}
+    fn update(&mut self, _props: &dyn std::any::Any) {}
 
     /// Render the component to an element tree
     fn render(&self, hooks: &Hooks, area: Rect) -> Element;
@@ -60,8 +60,8 @@ impl ComponentRegistry {
     }
 
     /// Get a mutable component by ID
-    pub fn get_mut(&mut self, id: ComponentId) -> Option<&mut dyn Component> {
-        self.components.get_mut(&id).map(|b| b.as_mut())
+    pub fn get_mut(&mut self, id: ComponentId) -> Option<&mut Box<dyn Component>> {
+        self.components.get_mut(&id)
     }
 
     /// Remove a component

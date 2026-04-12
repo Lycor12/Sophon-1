@@ -1,6 +1,6 @@
 //! Table widget for displaying tabular data
 
-use crate::element::Element;
+use crate::element::{Element, ElementKind};
 use crate::layout::{Constraint, Rect, Size};
 use crate::style::{BorderStyle, Color, Style};
 use crate::widgets::Widget;
@@ -44,13 +44,29 @@ pub enum Alignment {
     Right,
 }
 
+impl Alignment {
+    /// Align text within width
+    fn align(&self, text: &str, width: usize) -> String {
+        match self {
+            Alignment::Left => format!("{}{}", text, " ".repeat(width.saturating_sub(text.len()))),
+            Alignment::Right => format!("{}{}", " ".repeat(width.saturating_sub(text.len())), text),
+            Alignment::Center => {
+                let padding = width.saturating_sub(text.len());
+                let left = padding / 2;
+                let right = padding - left;
+                format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
+            }
+        }
+    }
+}
+
 /// Table row
 #[derive(Debug, Clone)]
 pub struct Row {
     /// Cell data
-    cells: Vec<String>,
+    pub cells: Vec<String>,
     /// Row style
-    style: Option<Style>,
+    pub style: Option<Style>,
 }
 
 impl Row {
@@ -91,6 +107,12 @@ pub struct Table {
     border: BorderStyle,
     /// Column separator
     separator: String,
+    /// Show header
+    show_header: bool,
+    /// Currently selected row
+    selected: Option<usize>,
+    /// Selected row style
+    selected_style: Style,
 }
 
 impl Table {
@@ -99,11 +121,14 @@ impl Table {
         Table {
             columns,
             rows: Vec::new(),
-            header_style: Style::default().fg(Color::White).bg(Color::DarkGrey).bold(),
+            header_style: Style::default().bold(),
             row_style: Style::default(),
-            alt_row_style: Some(Style::default().bg(Color::Rgb(40, 40, 40))),
-            border: BorderStyle::Single,
-            separator: " │ ".to_string(),
+            alt_row_style: None,
+            border: BorderStyle::None,
+            separator: " ".to_string(),
+            show_header: true,
+            selected: None,
+            selected_style: Style::default().fg(Color::White).bg(Color::Blue),
         }
     }
 
@@ -132,8 +157,8 @@ impl Table {
     }
 
     /// Set alternate row style
-    pub fn alt_row_style(mut self, style: Option<Style>) -> Self {
-        self.alt_row_style = style;
+    pub fn alt_row_style(mut self, style: Style) -> Self {
+        self.alt_row_style = Some(style);
         self
     }
 
@@ -143,142 +168,200 @@ impl Table {
         self
     }
 
-    /// Set separator
-    pub fn separator(mut self, sep: impl Into<String>) -> Self {
-        self.separator = sep.into();
+    /// Set column separator
+    pub fn separator(mut self, separator: impl Into<String>) -> Self {
+        self.separator = separator.into();
         self
     }
 
-    fn align_text(text: &str, width: usize, alignment: Alignment) -> String {
-        let text_len = text.chars().count();
-        if text_len >= width {
-            text.chars().take(width).collect()
-        } else {
-            let padding = width - text_len;
-            match alignment {
-                Alignment::Left => format!("{}{}", text, " ".repeat(padding)),
-                Alignment::Center => {
-                    let left = padding / 2;
-                    let right = padding - left;
-                    format!("{}{}{}", " ".repeat(left), text, " ".repeat(right))
+    /// Show/hide header
+    pub fn header(mut self, show: bool) -> Self {
+        self.show_header = show;
+        self
+    }
+
+    /// Set selected row
+    pub fn selected(mut self, index: usize) -> Self {
+        self.selected = Some(index);
+        self
+    }
+
+    /// Set selected row style
+    pub fn selected_style(mut self, style: Style) -> Self {
+        self.selected_style = style;
+        self
+    }
+
+    /// Get the number of rows
+    pub fn len(&self) -> usize {
+        self.rows.len()
+    }
+
+    /// Check if table is empty
+    pub fn is_empty(&self) -> bool {
+        self.rows.is_empty()
+    }
+
+    /// Scroll to next row
+    pub fn next(&mut self) {
+        if let Some(selected) = self.selected {
+            if selected < self.rows.len().saturating_sub(1) {
+                self.selected = Some(selected + 1);
+            }
+        } else if !self.rows.is_empty() {
+            self.selected = Some(0);
+        }
+    }
+
+    /// Scroll to previous row
+    pub fn previous(&mut self) {
+        if let Some(selected) = self.selected {
+            if selected > 0 {
+                self.selected = Some(selected - 1);
+            }
+        }
+    }
+
+    /// Get selected row index
+    pub fn selected_index(&self) -> Option<usize> {
+        self.selected
+    }
+
+    /// Calculate column widths based on constraints
+    fn calculate_widths(&self) -> Vec<usize> {
+        let num_cols = self.columns.len();
+        let mut widths = vec![0usize; num_cols];
+
+        // Start with header widths
+        for (i, col) in self.columns.iter().enumerate() {
+            match col.width {
+                Constraint::Length(n) => widths[i] = n as usize,
+                Constraint::Min(n) => widths[i] = n as usize,
+                Constraint::Max(n) => widths[i] = col.header.len().min(n as usize),
+                _ => widths[i] = col.header.len(),
+            }
+        }
+
+        // Adjust for cell content
+        for row in &self.rows {
+            for (i, cell) in row.cells.iter().enumerate().take(num_cols) {
+                if i < num_cols {
+                    match self.columns[i].width {
+                        Constraint::Length(n) => {} // Fixed, don't change
+                        Constraint::Min(n) => widths[i] = widths[i].max(cell.len().max(n as usize)),
+                        Constraint::Max(n) => widths[i] = widths[i].max(cell.len()).min(n as usize),
+                        _ => widths[i] = widths[i].max(cell.len()),
+                    }
                 }
-                Alignment::Right => format!("{}{}", " ".repeat(padding), text),
             }
         }
-    }
 
-    fn render_header(&self, widths: &[usize]) -> Element {
-        let mut cells = Vec::new();
-        for (col, width) in self.columns.iter().zip(widths.iter()) {
-            let aligned = Self::align_text(&col.header, *width, col.alignment);
-            cells.push(Element::Text {
-                content: aligned,
-                style: self.header_style,
-            });
-        }
-
-        Element::Container {
-            children: cells,
-            layout: crate::layout::Layout::horizontal(
-                widths
-                    .iter()
-                    .map(|w| Constraint::Length(*w as u16))
-                    .collect(),
-            ),
-            style: self.header_style,
-        }
-    }
-
-    fn render_row(&self, row: &Row, widths: &[usize], row_idx: usize) -> Element {
-        let mut cells = Vec::new();
-        let style = if let Some(ref s) = row.style {
-            *s
-        } else if let Some(alt_style) = self.alt_row_style {
-            if row_idx % 2 == 1 {
-                alt_style
-            } else {
-                self.row_style
-            }
-        } else {
-            self.row_style
-        };
-
-        for (cell, width) in row.cells.iter().zip(widths.iter()) {
-            let col = self.columns.get(cells.len()).unwrap();
-            let aligned = Self::align_text(cell, *width, col.alignment);
-            cells.push(Element::Text {
-                content: aligned,
-                style,
-            });
-        }
-
-        Element::Container {
-            children: cells,
-            layout: crate::layout::Layout::horizontal(
-                widths
-                    .iter()
-                    .map(|w| Constraint::Length(*w as u16))
-                    .collect(),
-            ),
-            style,
-        }
+        widths
     }
 }
 
 impl Widget for Table {
     fn render(&self, area: Rect) -> Element {
-        // Calculate column widths
-        let mut widths: Vec<usize> = self
-            .columns
-            .iter()
-            .map(|c| match c.width {
-                Constraint::Length(n) => n as usize,
-                Constraint::Percentage(p) => {
-                    ((area.width as f32 * p as f32 / 100.0) as u16).max(3) as usize
-                }
-                _ => 10,
-            })
-            .collect();
+        let widths = self.calculate_widths();
+        let num_cols = self.columns.len();
 
-        // Ensure widths fit in area
-        let total_width: usize = widths.iter().sum();
-        let available = area.width as usize - (self.columns.len() - 1) * self.separator.len();
-        if total_width > available {
-            // Scale down proportionally
-            let scale = available as f32 / total_width as f32;
-            for w in &mut widths {
-                *w = ((*w as f32 * scale) as usize).max(3);
-            }
-        }
-
+        // Build header row
         let mut children = Vec::new();
 
-        // Header
-        children.push(self.render_header(&widths));
-
-        // Rows
-        let max_rows = (area.height as usize).saturating_sub(1);
-        for (idx, row) in self.rows.iter().take(max_rows).enumerate() {
-            children.push(self.render_row(row, &widths, idx));
+        if self.show_header && !self.columns.is_empty() {
+            let mut header_cells = Vec::new();
+            for (i, col) in self.columns.iter().enumerate() {
+                let text = col.alignment.align(&col.header, widths[i]);
+                header_cells.push(Element {
+                    id: None,
+                    kind: ElementKind::Text(text),
+                    style: self.header_style,
+                    children: vec![],
+                    layout: None,
+                });
+            }
+            children.push(Element {
+                id: None,
+                kind: ElementKind::Row,
+                style: self.header_style,
+                children: header_cells,
+                layout: None,
+            });
         }
 
-        Element::Container {
-            children,
-            layout: crate::layout::Layout::vertical(
-                std::iter::repeat(Constraint::Length(1))
-                    .take(children.len())
-                    .collect(),
-            ),
+        // Build data rows
+        for (row_idx, row) in self.rows.iter().enumerate() {
+            let is_selected = self.selected == Some(row_idx);
+            let row_style = if is_selected {
+                self.selected_style
+            } else if let Some(alt_style) = &self.alt_row_style {
+                if row_idx % 2 == 1 {
+                    *alt_style
+                } else {
+                    row.style.unwrap_or(self.row_style)
+                }
+            } else {
+                row.style.unwrap_or(self.row_style)
+            };
+
+            let mut cells = Vec::new();
+            for (i, cell) in row.cells.iter().enumerate().take(num_cols) {
+                let text = if i < num_cols {
+                    self.columns[i].alignment.align(cell, widths[i])
+                } else {
+                    cell.clone()
+                };
+                cells.push(Element {
+                    id: None,
+                    kind: ElementKind::Text(text),
+                    style: row_style,
+                    children: vec![],
+                    layout: None,
+                });
+            }
+            children.push(Element {
+                id: None,
+                kind: ElementKind::Row,
+                style: row_style,
+                children: cells,
+                layout: None,
+            });
+        }
+
+        Element {
+            id: None,
+            kind: ElementKind::Column,
             style: Style::default(),
+            children,
+            layout: None,
         }
     }
 
     fn min_size(&self) -> Size {
-        let width = self.columns.len() * 10 + (self.columns.len() - 1) * self.separator.len();
-        let height = self.rows.len() + 1;
+        let num_cols = self.columns.len();
+        let num_rows = self.rows.len();
+
+        // Calculate column widths based on constraints
+        let mut widths = vec![0usize; num_cols];
+        for (i, col) in self.columns.iter().enumerate() {
+            widths[i] = widths[i].max(col.header.len());
+        }
+
+        for row in &self.rows {
+            for (i, cell) in row.cells.iter().enumerate().take(num_cols) {
+                if i < num_cols {
+                    widths[i] = widths[i].max(cell.len());
+                }
+            }
+        }
+
+        let total_width: usize =
+            widths.iter().sum::<usize>() + (num_cols.saturating_sub(1) * self.separator.len());
+        let total_height = num_rows.saturating_add(if self.show_header { 1 } else { 0 });
+
         Size {
-            width: width as u16,
-            height: height as u16,
+            width: total_width,
+            height: total_height,
         }
     }
 }
@@ -288,23 +371,213 @@ mod tests {
     use super::*;
 
     #[test]
-    fn table_creation() {
-        let cols = vec![
-            Column::new("Name", Constraint::Length(20)),
-            Column::new("Age", Constraint::Length(5)),
-        ];
-        let table = Table::new(cols)
-            .row(Row::from_slice(&["Alice", "30"]))
-            .row(Row::from_slice(&["Bob", "25"]));
+    fn table_column_creation() {
+        let col = Column::new("Name", Constraint::Length(20));
+        assert_eq!(col.header, "Name");
+        assert!(matches!(col.width, Constraint::Length(20)));
+    }
 
+    #[test]
+    fn table_column_alignment() {
+        let col = Column::new("Amount", Constraint::Length(10)).alignment(Alignment::Right);
+        assert!(matches!(col.alignment, Alignment::Right));
+    }
+
+    #[test]
+    fn table_row_creation() {
+        let row = Row::new(vec!["Cell 1".to_string(), "Cell 2".to_string()]);
+        assert_eq!(row.cells.len(), 2);
+        assert_eq!(row.cells[0], "Cell 1");
+    }
+
+    #[test]
+    fn table_row_from_slice() {
+        let row = Row::from_slice(&["A", "B", "C"]);
+        assert_eq!(row.cells, vec!["A", "B", "C"]);
+    }
+
+    #[test]
+    fn table_row_style() {
+        let row = Row::new(vec!["Test".to_string()]).style(Style::default().fg(Color::Red));
+        assert_eq!(row.style.unwrap().fg, Some(Color::Red));
+    }
+
+    #[test]
+    fn table_creation() {
+        let columns = vec![
+            Column::new("ID", Constraint::Length(5)),
+            Column::new("Name", Constraint::Length(20)),
+        ];
+        let table = Table::new(columns);
         assert_eq!(table.columns.len(), 2);
+        assert!(table.rows.is_empty());
+    }
+
+    #[test]
+    fn table_row() {
+        let columns = vec![
+            Column::new("A", Constraint::Length(5)),
+            Column::new("B", Constraint::Length(5)),
+        ];
+        let table = Table::new(columns).row(Row::new(vec!["1".to_string(), "2".to_string()]));
+        assert_eq!(table.rows.len(), 1);
+    }
+
+    #[test]
+    fn table_rows() {
+        let columns = vec![Column::new("Col", Constraint::Length(10))];
+        let table = Table::new(columns).rows(vec![
+            Row::new(vec!["Row 1".to_string()]),
+            Row::new(vec!["Row 2".to_string()]),
+        ]);
         assert_eq!(table.rows.len(), 2);
     }
 
     #[test]
-    fn text_alignment() {
-        assert_eq!(Table::align_text("hi", 5, Alignment::Left), "hi   ");
-        assert_eq!(Table::align_text("hi", 5, Alignment::Center), " hi  ");
-        assert_eq!(Table::align_text("hi", 5, Alignment::Right), "   hi");
+    fn table_styles() {
+        let columns = vec![Column::new("Col", Constraint::Length(10))];
+        let header_style = Style::default().bold();
+        let row_style = Style::default().fg(Color::Green);
+        let alt_style = Style::default().fg(Color::DarkGrey);
+
+        let table = Table::new(columns)
+            .header_style(header_style)
+            .row_style(row_style)
+            .alt_row_style(alt_style);
+
+        assert!(table.header_style.bold);
+        assert_eq!(table.row_style.fg, Some(Color::Green));
+        assert_eq!(table.alt_row_style.unwrap().fg, Some(Color::DarkGrey));
+    }
+
+    #[test]
+    fn table_border() {
+        let columns = vec![Column::new("Col", Constraint::Length(10))];
+        let table = Table::new(columns).border(BorderStyle::Double);
+        assert!(matches!(table.border, BorderStyle::Double));
+    }
+
+    #[test]
+    fn table_separator() {
+        let columns = vec![Column::new("Col", Constraint::Length(10))];
+        let table = Table::new(columns).separator(" | ");
+        assert_eq!(table.separator, " | ");
+    }
+
+    #[test]
+    fn table_header() {
+        let columns = vec![
+            Column::new("ID", Constraint::Length(5)),
+            Column::new("Name", Constraint::Length(10)),
+        ];
+        let table = Table::new(columns).header(true);
+        assert!(table.show_header);
+    }
+
+    #[test]
+    fn table_selected() {
+        let columns = vec![Column::new("Col", Constraint::Length(10))];
+        let table = Table::new(columns).selected(2);
+        assert_eq!(table.selected, Some(2));
+    }
+
+    #[test]
+    fn table_selected_style() {
+        let columns = vec![Column::new("Col", Constraint::Length(10))];
+        let selected_style = Style::default().bg(Color::Blue);
+        let table = Table::new(columns).selected_style(selected_style);
+        assert_eq!(table.selected_style.bg, Some(Color::Blue));
+    }
+
+    #[test]
+    fn table_selection_navigation() {
+        let columns = vec![Column::new("Col", Constraint::Length(10))];
+        let rows = vec![
+            Row::new(vec!["1".to_string()]),
+            Row::new(vec!["2".to_string()]),
+            Row::new(vec!["3".to_string()]),
+        ];
+        let mut table = Table::new(columns).rows(rows).selected(0);
+
+        table.next();
+        assert_eq!(table.selected, Some(1));
+
+        table.next();
+        assert_eq!(table.selected, Some(2));
+
+        table.next(); // Should stop at last
+        assert_eq!(table.selected, Some(2));
+
+        table.previous();
+        assert_eq!(table.selected, Some(1));
+
+        table.previous();
+        table.previous();
+        assert_eq!(table.selected, Some(0));
+
+        table.previous(); // Should stop at first
+        assert_eq!(table.selected, Some(0));
+    }
+
+    #[test]
+    fn table_empty_render() {
+        let columns = vec![Column::new("Col", Constraint::Length(10))];
+        let table = Table::new(columns);
+        let area = Rect::new(0, 0, 20, 5);
+        let el = table.render(area);
+
+        assert!(matches!(el.kind, ElementKind::Column));
+    }
+
+    #[test]
+    fn table_with_data_render() {
+        let columns = vec![
+            Column::new("ID", Constraint::Length(3)),
+            Column::new("Name", Constraint::Length(10)),
+        ];
+        let table = Table::new(columns)
+            .row(Row::new(vec!["1".to_string(), "Alice".to_string()]))
+            .row(Row::new(vec!["2".to_string(), "Bob".to_string()]));
+        let area = Rect::new(0, 0, 20, 5);
+        let el = table.render(area);
+
+        assert!(matches!(el.kind, ElementKind::Column));
+    }
+
+    #[test]
+    fn table_min_size() {
+        let columns = vec![
+            Column::new("ID", Constraint::Length(3)),
+            Column::new("Name", Constraint::Length(10)),
+        ];
+        let table = Table::new(columns).row(Row::new(vec!["1".to_string(), "Alice".to_string()]));
+        let size = table.min_size();
+
+        assert!(size.width >= 13); // ID(3) + Name(10)
+        assert!(size.height >= 2); // Header + 1 row
+    }
+
+    #[test]
+    fn alignment_left() {
+        let aligned = Alignment::Left.align("test", 10);
+        assert_eq!(aligned, "test      ");
+    }
+
+    #[test]
+    fn alignment_right() {
+        let aligned = Alignment::Right.align("test", 10);
+        assert_eq!(aligned, "      test");
+    }
+
+    #[test]
+    fn alignment_center() {
+        let aligned = Alignment::Center.align("test", 10);
+        assert_eq!(aligned, "   test   ");
+    }
+
+    #[test]
+    fn alignment_long_text() {
+        let aligned = Alignment::Left.align("verylongtext", 5);
+        assert_eq!(aligned, "verylongtext");
     }
 }

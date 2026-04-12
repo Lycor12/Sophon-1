@@ -2,24 +2,26 @@
 //!
 //! Modes:
 //! sophon — interactive agent loop (observe-plan-act)
+//! sophon tui — launch TUI-based interactive interface
 //! sophon infer <hex|stdin> — single forward pass on byte input
 //! sophon info — print model architecture and param count
 //! sophon sysstate — print system state snapshot
 //! sophon train <corpus_path> [options] — training loop with checkpointing
 //!
 //! The agent loop implements the execution-first intelligence pattern (spec Addendum A):
-//!   1. Observe: collect system state + screen frame + stdin
-//!   2. Plan: run belief update (active inference) + safety checks
-//!   3. Act: execute model-selected action via runtime primitives
-//!   4. Feedback: update belief from action result
+//! 1. Observe: collect system state + screen frame + stdin
+//! 2. Plan: run belief update (active inference) + safety checks
+//! 3. Act: execute model-selected action via runtime primitives
+//! 4. Feedback: update belief from action result
 //!
 //! All subsystems are wired together here:
-//!   - sophon-model: forward pass (byte -> logits)
-//!   - sophon-safety: purpose gate + self-diagnostic + alignment monitor
-//!   - sophon-inference: belief state + world model + self-improvement
-//!   - sophon-runtime: action execution + screen capture + system state
-//!   - sophon-verifier: output constraint (VERIFIED/UNVERIFIED)
-//!   - sophon-quant: GGUF loader for cold-start teacher weights
+//! - sophon-model: forward pass (byte -> logits)
+//! - sophon-safety: purpose gate + self-diagnostic + alignment monitor
+//! - sophon-inference: belief state + world model + self-improvement
+//! - sophon-runtime: action execution + screen capture + system state
+//! - sophon-verifier: output constraint (VERIFIED/UNVERIFIED)
+//! - sophon-quant: GGUF loader for cold-start teacher weights
+//! - sophon-tui: Terminal UI framework
 
 use sophon_config::ModelConfig;
 use sophon_model::Sophon1;
@@ -40,6 +42,7 @@ fn main() {
         "infer" => cmd_infer(&args[2..]),
         "sysstate" => cmd_sysstate(),
         "train" => cmd_train(&args[2..]),
+        "tui" => cmd_tui(),
         "agent" | _ => cmd_agent(),
     }
 }
@@ -634,4 +637,50 @@ fn hex_nibble(b: u8) -> Option<u8> {
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
     }
+}
+
+// ---------------------------------------------------------------------------
+// tui: TUI-based interactive interface
+// ---------------------------------------------------------------------------
+
+fn cmd_tui() {
+    use sophon_tui::prelude::*;
+    use sophon_tui::render_to_string;
+
+    // Create a simple demo UI
+    let ui = Element::column(vec![
+        Element::text("═══════════════════════════════════════════════")
+            .color(Color::Cyan)
+            .bold(),
+        Element::text("       Sophon-1 AGI Terminal Interface       ").color(Color::White),
+        Element::text("═══════════════════════════════════════════════")
+            .color(Color::Cyan)
+            .bold(),
+        Element::text(""),
+        Element::row(vec![
+            Element::text("Model: ").color(Color::Yellow),
+            Element::text("Sophon-1 (Execution-first)"),
+        ]),
+        Element::row(vec![
+            Element::text("Status: ").color(Color::Yellow),
+            Element::text("Ready").color(Color::Green),
+        ]),
+        Element::text(""),
+        Element::text("Commands:").color(Color::Blue).bold(),
+        Element::text("  info      - Show model architecture"),
+        Element::text("  infer     - Run inference on input"),
+        Element::text("  sysstate  - Show system state"),
+        Element::text("  train     - Training mode"),
+        Element::text("  agent     - Interactive agent loop"),
+        Element::text(""),
+        Element::text("═══════════════════════════════════════════════").color(Color::Cyan),
+        Element::text("  Type /quit to exit, or use arrow keys").dim(),
+    ]);
+
+    // Render to string and print
+    let output = render_to_string(&ui, 50, 16);
+    println!("{}", output);
+
+    println!("\nTUI Demo complete!");
+    println!("(Full interactive TUI requires terminal raw mode)");
 }

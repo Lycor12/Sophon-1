@@ -1,6 +1,6 @@
 //! Chart widget for rendering simple data visualizations
 
-use crate::element::Element;
+use crate::element::{Element, ElementKind};
 use crate::layout::{Rect, Size};
 use crate::style::{Color, Style};
 use crate::widgets::Widget;
@@ -93,7 +93,7 @@ impl Chart {
             show_legend: true,
             show_labels: true,
             style: Style::default(),
-            axis_style: Style::default().fg(Color::Grey),
+            axis_style: Style::default().fg(Color::DarkGrey),
         }
     }
 
@@ -105,7 +105,19 @@ impl Chart {
             show_legend: true,
             show_labels: true,
             style: Style::default(),
-            axis_style: Style::default().fg(Color::Grey),
+            axis_style: Style::default().fg(Color::DarkGrey),
+        }
+    }
+
+    /// Create a new scatter chart
+    pub fn scatter() -> Self {
+        Chart {
+            chart_type: ChartType::Scatter,
+            datasets: Vec::new(),
+            show_legend: true,
+            show_labels: true,
+            style: Style::default(),
+            axis_style: Style::default().fg(Color::DarkGrey),
         }
     }
 
@@ -115,220 +127,251 @@ impl Chart {
         self
     }
 
-    /// Set legend visibility
+    /// Show/hide legend
     pub fn show_legend(mut self, show: bool) -> Self {
         self.show_legend = show;
         self
     }
 
-    /// Set labels visibility
+    /// Show/hide labels
     pub fn show_labels(mut self, show: bool) -> Self {
         self.show_labels = show;
         self
     }
 
-    /// Get global data range
-    fn global_range(&self) -> (f64, f64) {
-        let mut min = f64::INFINITY;
-        let mut max = f64::NEG_INFINITY;
-
-        for dataset in &self.datasets {
-            let (dmin, dmax) = dataset.range();
-            min = min.min(dmin);
-            max = max.max(dmax);
-        }
-
-        if min == f64::INFINITY {
-            (0.0, 1.0)
-        } else if min == max {
-            (min, min + 1.0)
-        } else {
-            (min, max)
-        }
+    /// Set style
+    pub fn style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
     }
 
+    /// Set axis style
+    pub fn axis_style(mut self, style: Style) -> Self {
+        self.axis_style = style;
+        self
+    }
+
+    /// Render bar chart
     fn render_bar(&self, area: Rect) -> Element {
-        if self.datasets.is_empty() {
-            return Element::Text {
-                content: "No data".to_string(),
+        if self.datasets.is_empty() || area.width < 4 || area.height < 4 {
+            return Element {
+                id: None,
+                kind: ElementKind::Text("No data".to_string()),
                 style: self.style,
+                children: vec![],
+                layout: None,
             };
         }
 
-        let (min, max) = self.global_range();
-        let range = max - min;
+        let mut lines = Vec::new();
+        let chart_height = area.height.saturating_sub(2);
+        let chart_width = area.width.saturating_sub(4);
 
-        let chart_height =
-            area.height
-                .saturating_sub(if self.show_legend { 2 } else { 0 }) as usize;
-        let bar_width = 1u16;
-        let max_bars = (area.width / (bar_width + 1)) as usize;
+        // Find global range
+        let mut global_min = f64::INFINITY;
+        let mut global_max = f64::NEG_INFINITY;
+        for ds in &self.datasets {
+            let (min, max) = ds.range();
+            global_min = global_min.min(min);
+            global_max = global_max.max(max);
+        }
+        let range = (global_max - global_max).max(1.0);
 
-        let dataset = &self.datasets[0]; // Simple: render first dataset
-        let data = &dataset.data;
-
-        if data.is_empty() {
-            return Element::Text {
-                content: "No data".to_string(),
+        // Render bars
+        for row in 0..chart_height {
+            let mut line = String::new();
+            for ds in &self.datasets {
+                if ds.data.is_empty() {
+                    continue;
+                }
+                let bar_height = ((ds.data[0] - global_min) / range * chart_height as f64) as usize;
+                if chart_height.saturating_sub(row) <= bar_height {
+                    line.push(ds.symbol);
+                } else {
+                    line.push(' ');
+                }
+            }
+            lines.push(Element {
+                id: None,
+                kind: ElementKind::Text(line),
                 style: self.style,
+                children: vec![],
+                layout: None,
+            });
+        }
+
+        Element::column(lines)
+    }
+
+    /// Render line chart
+    fn render_line(&self, area: Rect) -> Element {
+        if self.datasets.is_empty() || area.width < 4 || area.height < 4 {
+            return Element {
+                id: None,
+                kind: ElementKind::Text("No data".to_string()),
+                style: self.style,
+                children: vec![],
+                layout: None,
             };
         }
 
-        // Sample data to fit width
-        let sample_every = (data.len() / max_bars).max(1);
-        let sampled: Vec<f64> = data
-            .chunks(sample_every)
-            .map(|chunk| chunk.iter().sum::<f64>() / chunk.len() as f64)
-            .take(max_bars)
-            .collect();
+        let chart_height = area.height.saturating_sub(2);
+        let chart_width = area.width.saturating_sub(4);
 
-        // Build chart rows from top down
-        let mut rows: Vec<Vec<char>> = vec![vec![' '; sampled.len()]; chart_height];
+        // Find global range
+        let mut global_min = f64::INFINITY;
+        let mut global_max = f64::NEG_INFINITY;
+        for ds in &self.datasets {
+            let (min, max) = ds.range();
+            global_min = global_min.min(min);
+            global_max = global_max.max(max);
+        }
+        let range = (global_max - global_min).max(1.0);
 
-        for (i, &value) in sampled.iter().enumerate() {
-            let normalized = ((value - min) / range).max(0.0).min(1.0);
-            let bar_height = (normalized * chart_height as f64) as usize;
+        // Build grid
+        let mut grid = vec![vec![' '; chart_width]; chart_height];
 
-            for h in 0..bar_height {
-                let row = chart_height - 1 - h;
-                if row < chart_height {
-                    rows[row][i] = dataset.symbol;
+        for ds in &self.datasets {
+            let points: Vec<(usize, usize)> = ds
+                .data
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &v)| {
+                    let x = (i * chart_width) / ds.data.len().max(1);
+                    let y = chart_height.saturating_sub(1)
+                        - ((v - global_min) / range * (chart_height.saturating_sub(1)) as f64)
+                            as usize;
+                    if x < chart_width && y < chart_height {
+                        Some((x, y))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            // Draw points and lines
+            for (i, &(x, y)) in points.iter().enumerate() {
+                grid[y][x] = ds.symbol;
+                if i > 0 {
+                    let prev = points[i - 1];
+                    // Simple line drawing
+                    let dx = x as isize - prev.0 as isize;
+                    let dy = y as isize - prev.1 as isize;
+                    if dx.abs() > dy.abs() {
+                        let step = if dx > 0 { 1 } else { -1 };
+                        let mut cx = prev.0 as isize;
+                        while cx != x as isize {
+                            cx += step;
+                            let cy = prev.1 as isize + dy * (cx - prev.0 as isize) / dx.max(1);
+                            if cx >= 0
+                                && cx < chart_width as isize
+                                && cy >= 0
+                                && cy < chart_height as isize
+                            {
+                                grid[cy as usize][cx as usize] = '─';
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Convert to elements
-        let mut children: Vec<Element> = rows
+        // Convert grid to elements
+        let lines: Vec<Element> = grid
             .into_iter()
-            .map(|row| Element::Text {
-                content: row.into_iter().collect(),
-                style: Style::default().fg(dataset.color),
+            .map(|row| Element {
+                id: None,
+                kind: ElementKind::Text(row.into_iter().collect::<String>()),
+                style: self.style,
+                children: vec![],
+                layout: None,
             })
             .collect();
 
-        // Add legend
-        if self.show_legend {
-            children.push(Element::Text {
-                content: format!("{}: {} to {}", dataset.name, min, max),
-                style: Style::default().fg(dataset.color),
-            });
-        }
-
-        Element::Container {
-            children,
-            layout: crate::layout::Layout::vertical(
-                std::iter::repeat(crate::layout::Constraint::Length(1))
-                    .take(children.len())
-                    .collect(),
-            ),
-            style: self.style,
-        }
+        Element::column(lines)
     }
 
-    fn render_line(&self, area: Rect) -> Element {
-        // Simplified line chart - just show data points
-        if self.datasets.is_empty() {
-            return Element::Text {
-                content: "No data".to_string(),
+    /// Render scatter chart
+    fn render_scatter(&self, area: Rect) -> Element {
+        if self.datasets.is_empty() || area.width < 4 || area.height < 4 {
+            return Element {
+                id: None,
+                kind: ElementKind::Text("No data".to_string()),
                 style: self.style,
+                children: vec![],
+                layout: None,
             };
         }
 
-        let mut content = String::new();
-        for dataset in &self.datasets {
-            content.push_str(&format!("{}: {:?}\n", dataset.name, dataset.data));
+        let chart_height = area.height.saturating_sub(2);
+        let chart_width = area.width.saturating_sub(4);
+
+        let mut grid = vec![vec![' '; chart_width]; chart_height];
+
+        for ds in &self.datasets {
+            let x_range = ds.data.len() as f64;
+            let (y_min, y_max) = ds.range();
+            let y_range = (y_max - y_min).max(1.0);
+
+            for (i, &v) in ds.data.iter().enumerate() {
+                let x = ((i as f64 / x_range) * (chart_width.saturating_sub(1)) as f64) as usize;
+                let y = chart_height.saturating_sub(1)
+                    - (((v - y_min) / y_range) * (chart_height.saturating_sub(1)) as f64) as usize;
+                if x < chart_width && y < chart_height {
+                    grid[y][x] = '●';
+                }
+            }
         }
 
-        Element::Text {
-            content: content.trim_end().to_string(),
-            style: self.style,
-        }
+        let lines: Vec<Element> = grid
+            .into_iter()
+            .map(|row| Element {
+                id: None,
+                kind: ElementKind::Text(row.into_iter().collect::<String>()),
+                style: self.style,
+                children: vec![],
+                layout: None,
+            })
+            .collect();
+
+        Element::column(lines)
+    }
+
+    /// Build legend element
+    fn build_legend(&self) -> Element {
+        let items: Vec<Element> = self
+            .datasets
+            .iter()
+            .map(|ds| {
+                Element::row(vec![
+                    Element::text(ds.symbol.to_string()).color(ds.color),
+                    Element::text(format!(" {}", ds.name)),
+                ])
+            })
+            .collect();
+        Element::column(items)
     }
 }
 
 impl Widget for Chart {
     fn render(&self, area: Rect) -> Element {
-        match self.chart_type {
+        let chart_element = match self.chart_type {
             ChartType::Bar => self.render_bar(area),
             ChartType::Line => self.render_line(area),
-            ChartType::Scatter => self.render_line(area), // Simplified
+            ChartType::Scatter => self.render_scatter(area),
+        };
+
+        if self.show_legend && !self.datasets.is_empty() {
+            Element::row(vec![chart_element, self.build_legend()])
+        } else {
+            chart_element
         }
     }
 
     fn min_size(&self) -> Size {
         Size {
-            width: 10,
-            height: 5,
-        }
-    }
-}
-
-/// Sparkline - minimal chart for inline use
-#[derive(Debug, Clone)]
-pub struct Sparkline {
-    /// Data points
-    data: Vec<f64>,
-    /// Max value (auto-detected if None)
-    max: Option<f64>,
-    /// Sparkline characters
-    symbols: &'static str,
-}
-
-impl Sparkline {
-    /// Create a new sparkline
-    pub fn new(data: Vec<f64>) -> Self {
-        Sparkline {
-            data,
-            max: None,
-            symbols: "▁▂▃▄▅▆▇█",
-        }
-    }
-
-    /// Set max value
-    pub fn max(mut self, max: f64) -> Self {
-        self.max = Some(max);
-        self
-    }
-
-    /// Render to string
-    pub fn render_to_string(&self) -> String {
-        if self.data.is_empty() {
-            return String::new();
-        }
-
-        let max = self
-            .max
-            .unwrap_or_else(|| self.data.iter().copied().fold(f64::NEG_INFINITY, f64::max));
-
-        let symbols: Vec<char> = self.symbols.chars().collect();
-        let symbol_count = symbols.len() as f64;
-
-        self.data
-            .iter()
-            .map(|&v| {
-                if max <= 0.0 {
-                    symbols[0]
-                } else {
-                    let idx = ((v / max) * (symbol_count - 1.0)) as usize;
-                    symbols[idx.min(symbols.len() - 1)]
-                }
-            })
-            .collect()
-    }
-}
-
-impl Widget for Sparkline {
-    fn render(&self, _area: Rect) -> Element {
-        Element::Text {
-            content: self.render_to_string(),
-            style: Style::default(),
-        }
-    }
-
-    fn min_size(&self) -> Size {
-        Size {
-            width: self.data.len() as u16,
-            height: 1,
+            width: 20,
+            height: 10,
         }
     }
 }
@@ -338,24 +381,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dataset_creation() {
+        let ds = Dataset::new("Test", vec![1.0, 2.0, 3.0]);
+        assert_eq!(ds.name, "Test");
+        assert_eq!(ds.data, vec![1.0, 2.0, 3.0]);
+    }
+
+    #[test]
     fn dataset_range() {
-        let ds = Dataset::new("test", vec![1.0, 5.0, 3.0, 10.0]);
+        let ds = Dataset::new("Test", vec![5.0, 1.0, 3.0, 10.0, 2.0]);
         let (min, max) = ds.range();
         assert_eq!(min, 1.0);
         assert_eq!(max, 10.0);
     }
 
     #[test]
-    fn sparkline_render() {
-        let spark = Sparkline::new(vec![1.0, 5.0, 10.0]);
-        let s = spark.render_to_string();
-        assert!(!s.is_empty());
-        assert_eq!(s.len(), 3);
+    fn chart_building() {
+        let chart = Chart::bar()
+            .dataset(Dataset::new("A", vec![1.0, 2.0, 3.0]))
+            .dataset(Dataset::new("B", vec![2.0, 3.0, 4.0]));
+
+        assert_eq!(chart.datasets.len(), 2);
+        assert!(matches!(chart.chart_type, ChartType::Bar));
     }
 
     #[test]
-    fn chart_dataset() {
-        let ds = Dataset::new("sales", vec![10.0, 20.0, 30.0]).color(Color::Green);
-        assert_eq!(ds.color, Color::Green);
+    fn chart_line() {
+        let chart = Chart::line().dataset(Dataset::new("Series", vec![1.0, 2.0, 3.0]));
+        assert!(matches!(chart.chart_type, ChartType::Line));
+    }
+
+    #[test]
+    fn chart_scatter() {
+        let chart = Chart::scatter().dataset(Dataset::new("Points", vec![1.0, 2.0, 3.0]));
+        assert!(matches!(chart.chart_type, ChartType::Scatter));
+    }
+
+    #[test]
+    fn chart_render_empty() {
+        let chart = Chart::bar();
+        let area = Rect::new(0, 0, 20, 10);
+        let el = chart.render(area);
+        assert!(matches!(el.kind, crate::element::ElementKind::Column));
+    }
+
+    #[test]
+    fn chart_with_legend() {
+        let chart = Chart::bar()
+            .dataset(Dataset::new("A", vec![1.0, 2.0, 3.0]))
+            .show_legend(true);
+        let area = Rect::new(0, 0, 40, 10);
+        let el = chart.render(area);
+        // Should be row with chart and legend
+        assert!(matches!(el.kind, crate::element::ElementKind::Row));
     }
 }

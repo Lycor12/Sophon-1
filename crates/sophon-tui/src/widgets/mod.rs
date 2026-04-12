@@ -3,17 +3,17 @@
 //! This module provides ready-to-use widgets that can be composed
 //! into larger applications.
 
+pub mod chart;
 pub mod list;
-pub mod table;
 pub mod progress;
 pub mod spinner;
-pub mod chart;
+pub mod table;
 
+pub use chart::{Chart, ChartType, Dataset};
 pub use list::List;
-pub use table::Table;
-pub use progress::ProgressBar;
-pub use spinner::Spinner;
-pub use chart::{Chart, Dataset};
+pub use progress::{MultiProgress, ProgressBar};
+pub use spinner::{Spinner, SpinnerState, SpinnerType, StatusSpinner};
+pub use table::{Alignment, Column, Row, Table};
 
 /// Widget trait - all widgets implement this
 pub trait Widget {
@@ -37,43 +37,70 @@ pub trait StatefulWidget {
     type State;
 
     /// Render with state
-    fn render(&self, area: crate::layout::Rect, state: &mut Self::State) -> crate::element::Element;
+    fn render(&self, area: crate::layout::Rect, state: &mut Self::State)
+        -> crate::element::Element;
 }
 
-/// Helper function to create a styled box
+/// Helper function to create a styled box with border
 pub fn styled_box(
     title: impl Into<String>,
     content: crate::element::Element,
     style: crate::style::Style,
 ) -> crate::element::Element {
-    use crate::element::Element;
-    use crate::layout::Constraint;
+    use crate::element::{Element, ElementKind};
     use crate::style::BorderStyle;
 
-    Element::Container {
-        children: vec![
-            Element::Text {
-                content: title.into(),
-                style,
-            },
-            content,
-        ],
-        layout: crate::layout::Layout::vertical(vec![
-            Constraint::Length(1),
-            Constraint::Fill,
-        ]),
+    Element {
+        id: None,
+        kind: ElementKind::Border(BorderStyle::Single),
         style,
+        children: vec![content],
+        layout: None,
     }
 }
 
 /// Helper function to create a centered element
-pub fn centered(element: crate::element::Element, container_size: crate::layout::Size) -> crate::element::Element {
-    use crate::element::Element;
-    use crate::layout::{Constraint, Layout};
+pub fn centered(
+    element: crate::element::Element,
+    container_size: crate::layout::Size,
+) -> crate::element::Element {
+    use crate::element::{Element, ElementKind};
 
-    Element::Container {
-        children: vec![element],
-        layout: Layout::centered(container_size),
-        style: crate::style::Style::default(),
-    }
+    let element_size = element.min_size();
+    let x = (container_size.width - element_size.width) / 2;
+    let y = (container_size.height - element_size.height) / 2;
+
+    Element::row(vec![
+        Element {
+            id: None,
+            kind: ElementKind::Spacer,
+            style: crate::style::Style::default(),
+            children: vec![],
+            layout: None,
+        }, // Left padding
+        Element::column(vec![
+            Element {
+                id: None,
+                kind: ElementKind::Spacer,
+                style: crate::style::Style::default(),
+                children: vec![],
+                layout: None,
+            }, // Top padding
+            element,
+            Element {
+                id: None,
+                kind: ElementKind::Spacer,
+                style: crate::style::Style::default(),
+                children: vec![],
+                layout: None,
+            }, // Bottom padding
+        ]),
+        Element {
+            id: None,
+            kind: ElementKind::Spacer,
+            style: crate::style::Style::default(),
+            children: vec![],
+            layout: None,
+        }, // Right padding
+    ])
 }

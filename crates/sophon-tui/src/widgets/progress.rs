@@ -1,7 +1,7 @@
 //! Progress bar widget
 
-use crate::element::Element;
-use crate::layout::{Constraint, Rect, Size};
+use crate::element::{Element, ElementKind};
+use crate::layout::{Rect, Size};
 use crate::style::{Color, Style};
 use crate::widgets::Widget;
 
@@ -14,7 +14,7 @@ pub struct ProgressBar {
     max: f64,
     /// Character to use for filled portion
     fill_char: char,
-    /// Character to use for empty portion  
+    /// Character to use for empty portion
     empty_char: char,
     /// Whether to show percentage
     show_percent: bool,
@@ -98,15 +98,42 @@ impl ProgressBar {
     /// Get percentage (0-100)
     pub fn percent(&self) -> f64 {
         if self.max <= 0.0 {
-            0.0
-        } else {
-            (self.value / self.max * 100.0).min(100.0).max(0.0)
+            return 0.0;
         }
+        (self.value / self.max * 100.0).clamp(0.0, 100.0)
     }
 
-    /// Update the value
-    pub fn set_value(&mut self, value: f64) {
-        self.value = value.min(self.max).max(0.0);
+    /// Get ratio (0.0-1.0)
+    pub fn ratio(&self) -> f64 {
+        if self.max <= 0.0 {
+            return 0.0;
+        }
+        (self.value / self.max).clamp(0.0, 1.0)
+    }
+
+    /// Check if complete
+    pub fn is_complete(&self) -> bool {
+        self.value >= self.max
+    }
+
+    /// Create a progress bar from ratio (0.0-1.0)
+    pub fn from_ratio(ratio: f64) -> Self {
+        Self::new().value(ratio * 100.0).max(100.0)
+    }
+
+    /// Create with custom characters (e.g., ascii: [=] style)
+    pub fn ascii() -> Self {
+        Self::new().fill_char('=').empty_char('-')
+    }
+
+    /// Create with dots style
+    pub fn dots() -> Self {
+        Self::new().fill_char('●').empty_char('○')
+    }
+
+    /// Create with blocks style
+    pub fn blocks() -> Self {
+        Self::new().fill_char('█').empty_char('░')
     }
 }
 
@@ -118,104 +145,186 @@ impl Default for ProgressBar {
 
 impl Widget for ProgressBar {
     fn render(&self, area: Rect) -> Element {
-        let percent = self.percent();
-        let bar_width = if self.show_percent {
-            area.width.saturating_sub(8) // Leave room for " 100.0%"
-        } else {
-            area.width
-        };
-
-        if bar_width == 0 {
-            return Element::Empty;
-        }
-
-        let filled = (percent / 100.0 * bar_width as f64) as u16;
-        let empty = bar_width.saturating_sub(filled);
-
-        let bar: String = std::iter::repeat(self.fill_char)
-            .take(filled as usize)
-            .chain(std::iter::repeat(self.empty_char).take(empty as usize))
-            .collect();
-
         let mut children = Vec::new();
 
-        // Label if present
-        if let Some(ref label) = self.label {
-            children.push(Element::Text {
-                content: label.clone(),
+        // Add label if present
+        if let Some(label) = &self.label {
+            children.push(Element {
+                id: None,
+                kind: ElementKind::Text(label.clone()),
                 style: self.label_style,
+                children: vec![],
+                layout: None,
             });
         }
 
-        // Progress bar
-        children.push(Element::Text {
-            content: bar.clone(),
+        // Calculate bar width
+        let percent_str = if self.show_percent {
+            format!(" {:.1}%", self.percent())
+        } else {
+            String::new()
+        };
+
+        let bar_width = area.width.saturating_sub(percent_str.len() as u16);
+        let filled = (self.ratio() * bar_width as f64) as usize;
+        let empty = bar_width as usize - filled;
+
+        // Build bar string
+        let mut bar = String::new();
+        for _ in 0..filled {
+            bar.push(self.fill_char);
+        }
+        for _ in 0..empty {
+            bar.push(self.empty_char);
+        }
+
+        children.push(Element {
+            id: None,
+            kind: ElementKind::Text(bar),
             style: self.bar_style,
+            children: vec![],
+            layout: None,
         });
 
-        // Percentage
+        // Add percentage if shown
         if self.show_percent {
-            let percent_str = format!("{:>6.1}%", percent);
-            children.push(Element::Text {
-                content: percent_str,
-                style: self.label_style,
+            children.push(Element {
+                id: None,
+                kind: ElementKind::Text(percent_str.trim().to_string()),
+                style: self.bar_style,
+                children: vec![],
+                layout: None,
             });
         }
 
-        if children.len() == 1 {
-            children.pop().unwrap()
-        } else {
-            Element::Container {
-                children,
-                layout: crate::layout::Layout::horizontal(vec![
-                    Constraint::Fill,
-                    Constraint::Length(bar_width),
-                    Constraint::Length(8),
-                ]),
-                style: Style::default(),
-            }
+        Element {
+            id: None,
+            kind: ElementKind::Row,
+            style: Style::default(),
+            children,
+            layout: None,
         }
     }
 
     fn min_size(&self) -> Size {
+        let label_width = self.label.as_ref().map(|l| l.len()).unwrap_or(0);
+        let percent_width = if self.show_percent { 6 } else { 0 };
         Size {
-            width: if self.show_percent { 10 } else { 5 },
+            width: label_width + 10 + percent_width,
             height: 1,
         }
     }
 }
 
-/// Stateful progress bar for tracking ongoing progress
+/// Multi-step progress for tracking multiple stages
 #[derive(Debug, Clone)]
-pub struct StatefulProgressBar {
-    config: ProgressBar,
+pub struct MultiProgress {
+    /// Current step (0-indexed)
+    current: usize,
+    /// Total steps
+    total: usize,
+    /// Step descriptions
+    steps: Vec<String>,
+    /// Style for completed steps
+    completed_style: Style,
+    /// Style for current step
+    current_style: Style,
+    /// Style for pending steps
+    pending_style: Style,
 }
 
-impl StatefulProgressBar {
-    /// Create new stateful progress bar
-    pub fn new(config: ProgressBar) -> Self {
-        StatefulProgressBar { config }
+impl MultiProgress {
+    /// Create a new multi-step progress tracker
+    pub fn new(steps: Vec<String>) -> Self {
+        MultiProgress {
+            current: 0,
+            total: steps.len(),
+            steps,
+            completed_style: Style::default().fg(Color::Green),
+            current_style: Style::default().fg(Color::Cyan).bold(),
+            pending_style: Style::default().fg(Color::DarkGrey),
+        }
     }
 
-    /// Update progress
-    pub fn set_progress(&mut self, value: f64) {
-        self.config.set_value(value);
+    /// Set current step
+    pub fn current(mut self, step: usize) -> Self {
+        self.current = step.min(self.total);
+        self
     }
 
-    /// Finish the progress bar
-    pub fn finish(&mut self) {
-        self.config.value = self.config.max;
+    /// Advance to next step
+    pub fn advance(&mut self) {
+        if self.current < self.total {
+            self.current += 1;
+        }
     }
 
-    /// Check if complete
+    /// Check if all steps complete
     pub fn is_complete(&self) -> bool {
-        self.config.value >= self.config.max
+        self.current >= self.total
+    }
+
+    /// Get progress percentage
+    pub fn percent(&self) -> f64 {
+        if self.total == 0 {
+            return 100.0;
+        }
+        (self.current as f64 / self.total as f64 * 100.0).min(100.0)
+    }
+
+    /// Set styles
+    pub fn styles(mut self, completed: Style, current: Style, pending: Style) -> Self {
+        self.completed_style = completed;
+        self.current_style = current;
+        self.pending_style = pending;
+        self
     }
 }
 
-impl Widget for StatefulProgressBar {
-    fn render(&self, area: Rect) -> Element {
-        self.config.render(area)
+impl Widget for MultiProgress {
+    fn render(&self, _area: Rect) -> Element {
+        let mut children = Vec::new();
+
+        for (idx, step) in self.steps.iter().enumerate() {
+            let prefix = if idx < self.current {
+                "✓ "
+            } else if idx == self.current {
+                "→ "
+            } else {
+                "  "
+            };
+
+            let style = if idx < self.current {
+                self.completed_style
+            } else if idx == self.current {
+                self.current_style
+            } else {
+                self.pending_style
+            };
+
+            children.push(Element {
+                id: None,
+                kind: ElementKind::Text(format!("{}{}", prefix, step)),
+                style,
+                children: vec![],
+                layout: None,
+            });
+        }
+
+        Element {
+            id: None,
+            kind: ElementKind::Column,
+            style: Style::default(),
+            children,
+            layout: None,
+        }
+    }
+
+    fn min_size(&self) -> Size {
+        Size {
+            width: self.steps.iter().map(|s| s.len()).max().unwrap_or(0) + 2,
+            height: self.steps.len(),
+        }
     }
 }
 
@@ -224,20 +333,142 @@ mod tests {
     use super::*;
 
     #[test]
-    fn progress_calculation() {
-        let pb = ProgressBar::new().with_value(50.0, 100.0);
-        assert!((pb.percent() - 50.0).abs() < 0.1);
-
-        let pb = ProgressBar::new().with_value(25.0, 100.0);
-        assert!((pb.percent() - 25.0).abs() < 0.1);
+    fn progress_bar_creation() {
+        let pb = ProgressBar::new();
+        assert_eq!(pb.value, 0.0);
+        assert_eq!(pb.max, 100.0);
     }
 
     #[test]
-    fn progress_bounds() {
-        let pb = ProgressBar::new().max(100.0).value(150.0);
+    fn progress_bar_value() {
+        let pb = ProgressBar::new().value(50.0);
+        assert_eq!(pb.value, 50.0);
+        assert_eq!(pb.percent(), 50.0);
+    }
+
+    #[test]
+    fn progress_bar_clamping() {
+        let pb = ProgressBar::new().value(150.0);
+        assert_eq!(pb.value, 100.0);
         assert_eq!(pb.percent(), 100.0);
 
-        let pb = ProgressBar::new().max(100.0).value(-10.0);
+        let pb = ProgressBar::new().value(-10.0);
+        assert_eq!(pb.value, 0.0);
         assert_eq!(pb.percent(), 0.0);
+    }
+
+    #[test]
+    fn progress_bar_ratio() {
+        let pb = ProgressBar::new().value(25.0).max(50.0);
+        assert_eq!(pb.ratio(), 0.5);
+    }
+
+    #[test]
+    fn progress_bar_custom_chars() {
+        let pb = ProgressBar::new().fill_char('=').empty_char('-');
+        assert_eq!(pb.fill_char, '=');
+        assert_eq!(pb.empty_char, '-');
+    }
+
+    #[test]
+    fn progress_bar_ascii() {
+        let pb = ProgressBar::ascii();
+        assert_eq!(pb.fill_char, '=');
+        assert_eq!(pb.empty_char, '-');
+    }
+
+    #[test]
+    fn progress_bar_dots() {
+        let pb = ProgressBar::dots();
+        assert_eq!(pb.fill_char, '●');
+        assert_eq!(pb.empty_char, '○');
+    }
+
+    #[test]
+    fn progress_bar_label() {
+        let pb = ProgressBar::new().label("Loading");
+        assert_eq!(pb.label, Some("Loading".to_string()));
+    }
+
+    #[test]
+    fn progress_bar_complete() {
+        let pb = ProgressBar::new().value(100.0);
+        assert!(pb.is_complete());
+
+        let pb = ProgressBar::new().value(50.0);
+        assert!(!pb.is_complete());
+    }
+
+    #[test]
+    fn progress_bar_from_ratio() {
+        let pb = ProgressBar::from_ratio(0.75);
+        assert_eq!(pb.percent(), 75.0);
+    }
+
+    #[test]
+    fn progress_bar_show_percent() {
+        let pb = ProgressBar::new().show_percent(false);
+        assert!(!pb.show_percent);
+    }
+
+    #[test]
+    fn multi_progress_creation() {
+        let steps = vec![
+            "Step 1".to_string(),
+            "Step 2".to_string(),
+            "Step 3".to_string(),
+        ];
+        let mp = MultiProgress::new(steps);
+        assert_eq!(mp.total, 3);
+        assert_eq!(mp.current, 0);
+    }
+
+    #[test]
+    fn multi_progress_advance() {
+        let steps = vec!["A".to_string(), "B".to_string()];
+        let mut mp = MultiProgress::new(steps);
+        assert_eq!(mp.current, 0);
+
+        mp.advance();
+        assert_eq!(mp.current, 1);
+
+        mp.advance();
+        assert_eq!(mp.current, 2);
+        assert!(mp.is_complete());
+
+        mp.advance(); // Should not exceed total
+        assert_eq!(mp.current, 2);
+    }
+
+    #[test]
+    fn multi_progress_percent() {
+        let steps = vec![
+            "A".to_string(),
+            "B".to_string(),
+            "C".to_string(),
+            "D".to_string(),
+        ];
+        let mut mp = MultiProgress::new(steps).current(2);
+        assert_eq!(mp.percent(), 50.0);
+    }
+
+    #[test]
+    fn progress_bar_render() {
+        let pb = ProgressBar::new().value(50.0);
+        let area = Rect::new(0, 0, 20, 1);
+        let el = pb.render(area);
+
+        assert!(matches!(el.kind, ElementKind::Row));
+    }
+
+    #[test]
+    fn multi_progress_render() {
+        let steps = vec!["Step 1".to_string(), "Step 2".to_string()];
+        let mp = MultiProgress::new(steps).current(1);
+        let area = Rect::new(0, 0, 20, 2);
+        let el = mp.render(area);
+
+        assert!(matches!(el.kind, ElementKind::Column));
+        assert_eq!(el.children.len(), 2);
     }
 }

@@ -6,7 +6,7 @@
 //! 3. Output to terminal
 
 use crate::element::Element;
-use crate::layout::{Rect, Size};
+use crate::layout::Rect;
 use crate::render::RenderBuffer;
 use crate::terminal::Terminal;
 

@@ -207,9 +207,9 @@ impl UseEffect {
 
     /// Cleanup all effects (call on unmount)
     pub fn cleanup(&self) {
-        let effects = self.effects.borrow();
-        for effect in effects.iter() {
-            if let Some(cleanup) = &effect.cleanup {
+        let mut effects = self.effects.borrow_mut();
+        for effect in effects.iter_mut() {
+            if let Some(cleanup) = effect.cleanup.take() {
                 cleanup();
             }
         }
