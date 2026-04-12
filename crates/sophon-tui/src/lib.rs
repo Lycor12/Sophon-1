@@ -14,25 +14,21 @@
 //! ## Example
 //!
 //! ```rust
-//! use sophon_tui::{render, component, use_state, Element, Color};
+//! use sophon_tui::{use_state, Element, Color};
 //!
-//! #[component]
 //! fn counter() -> Element {
-//!     let (count, set_count) = use_state(0);
-//!     
+//!     let (count, _set_count) = use_state(0);
+//!
 //!     Element::column(vec![
 //!         Element::text("Counter App").bold().color(Color::Cyan),
 //!         Element::text(format!("Count: {}", count)),
-//!         Element::row(vec![
-//!             Element::button("+", move || set_count(count + 1)),
-//!             Element::button("-", move || set_count(count - 1)),
-//!         ]),
+//!         Element::text("Press +/- to modify").color(Color::DarkGrey),
 //!     ])
 //! }
 //!
-//! fn main() {
-//!     render(counter);
-//! }
+//! # fn main() {
+//! #     let _element = counter();
+//! # }
 //! ```
 
 #![forbid(unsafe_code)]
@@ -51,14 +47,21 @@ mod terminal;
 
 pub use ansi::{style_to_ansi, AnsiBuffer, AnsiCode, RESET};
 pub use component::{Component, ComponentId, ComponentRegistry, RenderContext};
-pub use effect::{Dependency, Effect, EffectQueue, EffectType};
+pub use effect::{
+    use_effect, use_effect_with_cleanup, Dependency, Effect, EffectQueue, EffectType,
+};
 pub use element::{Element, ElementId, ElementKind};
-pub use hook::{HookId, HookState, Hooks};
-pub use input::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
+pub use hook::{
+    clear_hooks, init_hooks, use_memo, use_ref, use_state, HookId, HookState, Hooks, MemoDep,
+};
+pub use input::{
+    parse_escape_sequence, Event, EventHandler, EventListener, EventSource, KeyCode, KeyEvent,
+    KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind, PollEventSource,
+};
 pub use layout::{Constraint, Layout, Rect, Size};
 pub use render::{render_element, render_to_string, RenderBuffer};
 pub use renderer::{RenderMode, Renderer};
-pub use style::{BorderStyle, Color, Style, TextWrap};
+pub use style::{BorderStyle, Color, Style, TextStyle, TextWrap};
 pub use terminal::{Capabilities, Terminal, TerminalBuffer};
 
 /// Re-export commonly used functions

@@ -382,8 +382,8 @@ mod tests {
         spinner.tick();
         assert_eq!(spinner.frame, 1);
 
-        // Wrap around
-        for _ in 0..spinner.spinner_type.frame_count() {
+        // Wrap around - tick remaining (frame_count - 1) times to get back to 0
+        for _ in 1..spinner.spinner_type.frame_count() {
             spinner.tick();
         }
         assert_eq!(spinner.frame, 0);

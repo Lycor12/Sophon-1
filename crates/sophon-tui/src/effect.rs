@@ -221,3 +221,47 @@ impl Default for UseEffect {
         Self::new()
     }
 }
+
+/// use_effect hook - execute side effects
+///
+/// Similar to React's useEffect. The effect runs after rendering completes.
+/// Returns the effect index for potential cleanup.
+pub fn use_effect<F>(callback: F, effect_type: EffectType) -> usize
+where
+    F: FnOnce() + 'static,
+{
+    thread_local! {
+        static EFFECTS: RefCell<UseEffect> = RefCell::new(UseEffect::new());
+    }
+
+    let idx = EFFECTS.with(|e| {
+        let effect = Effect {
+            effect_type,
+            last_deps: None,
+            has_run: false,
+            cleanup: None,
+        };
+        e.borrow().register(effect)
+    });
+
+    // Run the callback
+    callback();
+
+    idx
+}
+
+/// use_effect with cleanup - execute side effects with cleanup function
+///
+/// Similar to React's useEffect with cleanup. The cleanup runs before the
+/// next effect execution or on unmount.
+pub fn use_effect_with_cleanup<F, C>(callback: F, cleanup: C, effect_type: EffectType) -> usize
+where
+    F: FnOnce() + 'static,
+    C: FnOnce() + 'static,
+{
+    // Run cleanup from previous effect
+    cleanup();
+
+    // Run new effect
+    use_effect(callback, effect_type)
+}

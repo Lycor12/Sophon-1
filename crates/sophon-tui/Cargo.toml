@@ -9,5 +9,21 @@ license = "MIT OR Apache-2.0"
 [dependencies]
 sophon-core = { path = "../sophon-core" }
 
+[[example]]
+name = "counter"
+path = "examples/counter.rs"
+
+[[example]]
+name = "memo"
+path = "examples/memo.rs"
+
+[[example]]
+name = "effects"
+path = "examples/effects.rs"
+
+[[example]]
+name = "events"
+path = "examples/events.rs"
+
 [features]
 default = []

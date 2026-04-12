@@ -267,6 +267,15 @@ impl Element {
         self
     }
 
+    /// Apply a style transformation function
+    pub fn with_style<F>(mut self, f: F) -> Self
+    where
+        F: FnOnce(Style) -> Style,
+    {
+        self.style = f(self.style);
+        self
+    }
+
     /// Get minimum size required by this element
     pub fn min_size(&self) -> Size {
         match &self.kind {

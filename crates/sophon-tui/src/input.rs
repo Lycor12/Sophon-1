@@ -140,6 +140,11 @@ impl KeyModifiers {
     pub fn add(&mut self, other: KeyModifiers) {
         self.0 |= other.0
     }
+
+    /// Check if no modifiers are set
+    pub fn is_empty(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 impl std::ops::BitOr for KeyModifiers {

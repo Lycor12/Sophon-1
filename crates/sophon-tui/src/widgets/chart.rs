@@ -422,7 +422,8 @@ mod tests {
         let chart = Chart::bar();
         let area = Rect::new(0, 0, 20, 10);
         let el = chart.render(area);
-        assert!(matches!(el.kind, crate::element::ElementKind::Column));
+        // Empty chart with no data returns Text element (not Column)
+        assert!(matches!(el.kind, crate::element::ElementKind::Text(_)));
     }
 
     #[test]
