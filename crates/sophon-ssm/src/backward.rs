@@ -630,7 +630,7 @@ mod tests {
 
         // Forward
         let mut state = SsmState::new();
-        let (y, cache) = ssm_step_with_cache(&mut state, &disc, &params, &u);
+        let (_y, cache) = ssm_step_with_cache(&mut state, &disc, &params, &u);
 
         // Backward with grad_y = 1 (loss = sum(y))
         let grad_y = vec![vec![1.0f32; SSM_P]];

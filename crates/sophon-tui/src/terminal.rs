@@ -11,6 +11,8 @@
 
 use std::io::{self, Write};
 
+use crate::platform;
+
 /// Terminal abstraction
 #[derive(Debug)]
 pub struct Terminal {
@@ -88,10 +90,11 @@ impl Terminal {
         Ok(Terminal { width, height })
     }
 
-    /// Enable raw mode (simplified - no unsafe code)
+    /// Enable raw mode
     pub fn enable_raw_mode(&mut self) -> io::Result<()> {
-        // Simplified implementation - just clear screen
-        // Full raw mode requires platform-specific code
+        // Enable ANSI support on Windows
+        platform::init_terminal()?;
+        // Clear screen
         self.clear()
     }
 
@@ -126,74 +129,47 @@ impl Terminal {
 
     /// Clear the screen
     pub fn clear(&mut self) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[2J\x1b[H")?;
-        stdout.flush()
+        platform::clear_screen()
     }
 
     /// Clear from cursor to end of screen
     pub fn clear_from_cursor(&mut self) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[0J")?;
-        stdout.flush()
+        platform::clear_from_cursor()
     }
 
     /// Hide cursor
     pub fn hide_cursor(&mut self) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[?25l")?;
-        stdout.flush()
+        platform::hide_cursor()
     }
 
     /// Show cursor
     pub fn show_cursor(&mut self) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[?25h")?;
-        stdout.flush()
+        platform::show_cursor()
     }
 
     /// Move cursor to position (1-indexed)
     pub fn move_cursor(&mut self, x: u16, y: u16) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[{};{}H", y + 1, x + 1)?;
-        stdout.flush()
+        platform::move_cursor(x, y)
     }
 
     /// Save cursor position
     pub fn save_cursor(&mut self) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[s")?;
-        stdout.flush()
+        platform::save_cursor()
     }
 
     /// Restore cursor position
     pub fn restore_cursor(&mut self) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[u")?;
-        stdout.flush()
+        platform::restore_cursor()
     }
 
     /// Enter alternate screen
     pub fn enter_alternate_screen(&mut self) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[?1049h")?;
-        stdout.flush()
+        platform::enter_alternate_screen()
     }
 
     /// Leave alternate screen
     pub fn leave_alternate_screen(&mut self) -> io::Result<()> {
-        let stdout = std::io::stdout();
-        let mut stdout = stdout.lock();
-        write!(stdout, "\x1b[?1049l")?;
-        stdout.flush()
+        platform::leave_alternate_screen()
     }
 
     /// Detect terminal capabilities

@@ -2,7 +2,6 @@
 
 use std::io;
 use std::process::{Command, ExitStatus, Stdio};
-use std::time::Duration;
 
 /// Result of running a subprocess.
 #[derive(Debug)]

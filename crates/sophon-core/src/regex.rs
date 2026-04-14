@@ -56,16 +56,23 @@ impl std::error::Error for RegexError {}
 /// NFA state type - stored separately from states to allow Copy
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StateTypeTag {
-    Char,
+    /// Matches a specific character
+    Char(char),
+    /// Matches any character
     Any,
+    /// Matches a character class [abc] or [^abc]
     Class {
         start_idx: usize,
         end_idx: usize,
         negated: bool,
     },
+    /// Epsilon transition (no character consumed)
     Epsilon,
+    /// Start anchor (^)
     StartAnchor,
+    /// End anchor ($)
     EndAnchor,
+    /// Match state (accepting)
     Match,
 }
 
@@ -89,6 +96,7 @@ pub struct Regex {
     states: Vec<State>,
     char_classes: Vec<CharClass>,
     start: usize,
+    /// Original pattern string for display and debugging
     pattern: String,
 }
 
@@ -115,6 +123,11 @@ impl Regex {
             start: nfa.start,
             pattern: pattern.to_string(),
         })
+    }
+
+    /// Get the original pattern string used to compile this regex.
+    pub fn pattern(&self) -> &str {
+        &self.pattern
     }
 
     /// Check if the regex matches anywhere in the string
@@ -172,18 +185,16 @@ impl Regex {
                 let state = &self.states[state_idx];
 
                 match state.tag {
-                    StateTypeTag::Char => {
-                        // Get the char from the pattern (stored in a separate lookup)
-                        // For simplicity, we store the expected char in the first char class
-                        if let Some(class_idx) = self.char_classes.first() {
-                            if class_idx.chars.first() == Some(&ch) {
-                                if let Some(out) = state.out {
-                                    self.add_epsilon_states(&mut next, out);
-                                }
+                    StateTypeTag::Char(expected) => {
+                        // Match specific character
+                        if expected == ch {
+                            if let Some(out) = state.out {
+                                self.add_epsilon_states(&mut next, out);
                             }
                         }
                     }
                     StateTypeTag::Any => {
+                        // Match any character
                         if let Some(out) = state.out {
                             self.add_epsilon_states(&mut next, out);
                         }
@@ -193,6 +204,7 @@ impl Regex {
                         end_idx: _,
                         negated,
                     } => {
+                        // Match character class
                         let class = &self.char_classes[start_idx];
                         let in_class = class.chars.contains(&ch);
                         if (in_class && !negated) || (!in_class && negated) {
@@ -407,17 +419,8 @@ impl Parser {
             // Literal character
             match self.next_char() {
                 Some(ch) if !is_special(ch) => {
-                    let class_idx = self.char_classes.len();
-                    self.char_classes.push(CharClass { chars: vec![ch] });
-                    let state = self.add_state(
-                        StateTypeTag::Class {
-                            start_idx: class_idx,
-                            end_idx: class_idx + 1,
-                            negated: false,
-                        },
-                        None,
-                        None,
-                    );
+                    // Use StateTypeTag::Char for literal characters (more efficient than Class)
+                    let state = self.add_state(StateTypeTag::Char(ch), None, None);
                     let accept = self.add_state(StateTypeTag::Epsilon, None, None);
                     self.patch(state, accept);
                     Ok(Frag {

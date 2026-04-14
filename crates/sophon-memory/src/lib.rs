@@ -2,7 +2,8 @@
 #![forbid(unsafe_code)]
 
 use sophon_config::HDC_DIM;
-use sophon_core::hdc::{bind, bundle, circular_conv, l2_normalize};
+// HDC operations re-exported for use across memory modules
+pub use sophon_core::hdc::{bind, bundle, circular_conv, l2_normalize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Helper: normalize a slice and return the normalized vector.

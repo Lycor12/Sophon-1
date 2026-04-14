@@ -40,6 +40,7 @@ mod element;
 mod hook;
 mod input;
 mod layout;
+mod platform;
 mod render;
 mod renderer;
 mod style;

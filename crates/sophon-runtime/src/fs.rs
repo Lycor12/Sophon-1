@@ -60,7 +60,6 @@ pub fn delete_file(path: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn write_read_roundtrip() {

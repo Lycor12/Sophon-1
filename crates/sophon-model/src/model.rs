@@ -15,6 +15,7 @@ use crate::{
 };
 use sophon_config::NUM_BLOCKS;
 use sophon_core::{CoreError, Tensor};
+use sophon_ssm::SsmState;
 use sophon_verifier::{VerifiedOutput, VerifierGate};
 
 // ---------------------------------------------------------------------------
@@ -99,10 +100,48 @@ impl Sophon1 {
         })
     }
 
-    /// Process a byte sequence. Returns one ModelOutput per input token.
+    /// Process a byte sequence with optional state caching.
+    /// Returns one ModelOutput per input token.
+    /// If cache_prefix is Some, caches the SSM state at each position for reuse.
     pub fn forward_sequence(&mut self, tokens: &[u8]) -> Result<Vec<ModelOutput>, CoreError> {
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Reset state for new sequence
         self.reset_state();
+
+        // Process tokens
         tokens.iter().map(|&t| self.forward_token(t)).collect()
+    }
+
+    /// Optimized forward for repeated inference with cached states.
+    /// Uses cached states to resume processing instead of starting fresh.
+    pub fn forward_sequence_cached(
+        &mut self,
+        tokens: &[u8],
+        cache_states: Option<&[SsmState]>,
+    ) -> Result<Vec<ModelOutput>, CoreError> {
+        if tokens.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // If we have cached states, restore them instead of starting fresh
+        if let Some(states) = cache_states {
+            if states.len() == self.states.states.len() {
+                for (i, cached) in states.iter().enumerate() {
+                    self.states.states[i] = cached.clone();
+                }
+            }
+        }
+
+        // Process tokens
+        tokens.iter().map(|&t| self.forward_token(t)).collect()
+    }
+
+    /// Get current SSM states for caching
+    pub fn get_cached_states(&self) -> Vec<SsmState> {
+        self.states.states.clone()
     }
 
     /// Total parameter count across all components.

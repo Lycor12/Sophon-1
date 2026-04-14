@@ -116,10 +116,12 @@ impl TaskSuite {
         self
     }
 
-    /// Run all tasks in suite (backward compatibility - uses placeholder model).
+    /// Run all tasks in suite. Requires a model to be provided.
+    ///
+    /// # Panics
+    /// Panics if called directly - use `run_with_model()` instead.
     pub fn run(&self) -> super::SuiteMetrics {
-        let mut placeholder = PlaceholderModel;
-        self.run_with_model(&mut placeholder)
+        panic!("TaskSuite::run() requires a model. Use run_with_model() with a Sophon1 instance instead.")
     }
 
     /// Run all tasks in suite with a real model.
@@ -458,20 +460,6 @@ where
         Err(())
     } else {
         Ok(result)
-    }
-}
-
-/// Placeholder model for backward compatibility.
-struct PlaceholderModel;
-
-impl ModelInference for PlaceholderModel {
-    fn generate(
-        &mut self,
-        input: &str,
-        _max_tokens: usize,
-    ) -> Result<String, Box<dyn std::error::Error + Send>> {
-        // Return a simple placeholder response
-        Ok(format!("placeholder response for: {}", input))
     }
 }
 

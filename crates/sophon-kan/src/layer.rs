@@ -271,7 +271,6 @@ impl KanLayer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sophon_core::tensor::allclose;
 
     #[test]
     fn forward_zero_weights_gives_zero() {

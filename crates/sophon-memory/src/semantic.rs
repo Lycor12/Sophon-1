@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 use sophon_config::HDC_DIM;
+use sophon_core::hdc::{bind, bundle};
 use std::collections::{HashMap, HashSet};
 
 /// A fact: (subject, relation, object).
@@ -28,20 +29,31 @@ impl Fact {
         self
     }
 
-    /// Encode fact as HDC vector using simple binding.
+    /// Encode fact as HDC vector using proper HDC binding and bundling.
+    /// Formula: bundle([bind(sub, rel), obj]) which is (sub ⊗ rel) ⊕ obj
     pub fn encode(&self) -> Vec<f32> {
         let sub_hv = text_to_hypervector(&self.subject);
         let rel_hv = text_to_hypervector(&self.relation);
         let obj_hv = text_to_hypervector(&self.object);
 
-        // Simple bundling: average + elementwise multiply for binding
-        let mut combined = vec![0.0f32; HDC_DIM];
-        for i in 0..HDC_DIM {
-            // (sub ⊗ rel) ⊕ obj
-            combined[i] = sub_hv[i] * rel_hv[i] + obj_hv[i];
-        }
+        // HDC encoding: (subject ⊗ relation) ⊕ object
+        // bind(sub, rel) gives us sub ⊗ rel
+        let bound = bind(&sub_hv, &rel_hv).unwrap_or_else(|_| {
+            // Fallback: elementwise multiplication for binding
+            sub_hv.iter().zip(&rel_hv).map(|(a, b)| a * b).collect()
+        });
 
-        l2_normalize_vec(&combined)
+        // bundle([bound, obj]) gives us (sub ⊗ rel) ⊕ obj
+        let bundled = bundle(&[&bound, &obj_hv]).unwrap_or_else(|_| {
+            // Fallback: simple average for bundling
+            bound
+                .iter()
+                .zip(&obj_hv)
+                .map(|(a, b)| (a + b) / 2.0)
+                .collect()
+        });
+
+        l2_normalize_vec(&bundled)
     }
 }
 

@@ -8,12 +8,12 @@ use crate::element::Element;
 use crate::layout::{Rect, Size};
 use crate::style::Style;
 
-/// Render an element to a string (useful for testing and debugging)
+/// Render an element to a string with ANSI escape sequences for colors and styles
 pub fn render_to_string(element: &Element, width: u16, height: u16) -> String {
     let area = Rect::new(0, 0, width, height);
     let mut buffer = RenderBuffer::new(width, height);
     render_element(element, &mut buffer, area, Style::default());
-    buffer.to_string()
+    buffer.to_ansi_string()
 }
 
 /// Render an element and return lines (for line-by-line processing)

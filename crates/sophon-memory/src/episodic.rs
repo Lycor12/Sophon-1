@@ -77,7 +77,8 @@ impl EpisodicMemory {
 
     /// Record a new episode.
     pub fn record(&mut self, episode: Episode) {
-        if self.episodes.len() >= self.capacity {
+        // Ensure we have room - remove oldest if at capacity
+        while self.episodes.len() >= self.capacity {
             self.consolidate_oldest();
         }
         self.episodes.push(episode);
@@ -167,8 +168,11 @@ impl EpisodicMemory {
     }
 
     fn consolidate_oldest(&mut self) {
-        let to_remove = self.capacity / 10;
-        self.episodes.drain(0..to_remove.min(self.episodes.len()));
+        if self.episodes.len() >= self.capacity {
+            // Remove oldest 10% or enough to make room
+            let to_remove = (self.capacity / 10).max(1);
+            self.episodes.drain(0..to_remove.min(self.episodes.len()));
+        }
     }
 
     pub fn len(&self) -> usize {

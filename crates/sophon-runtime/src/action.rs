@@ -31,7 +31,7 @@ pub enum Action {
     },
     /// Read an environment variable.
     EnvRead { key: String },
-    /// Capture screen (placeholder; vision pipeline not yet implemented).
+    /// Capture screen using DBSC (Direct Byte Screen Capture) downsampled to 256x256 grayscale.
     ScreenCapture,
     /// No-op: model explicitly chose not to act.
     Noop { reason: String },

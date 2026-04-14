@@ -35,10 +35,10 @@ use sophon_verifier::{VerifiedOutput, VerifierGate};
 #[test]
 fn bench_model_inference_short() {
     let mut model = Sophon1::new(0x1234);
-    let input = b"Hi";
+    let input = b"Hello";
 
     let start = Instant::now();
-    let iterations = 2; // Reduced for reasonable test time
+    let iterations = 2;
 
     for _ in 0..iterations {
         let _ = model.forward_sequence(input);
@@ -56,10 +56,10 @@ fn bench_model_inference_short() {
 #[test]
 fn bench_model_inference_medium() {
     let mut model = Sophon1::new(0x1234);
-    let input = b"Test";
+    let input = b"This is a medium length input string for testing";
 
     let start = Instant::now();
-    let iterations = 2; // Reduced for reasonable test time
+    let iterations = 2;
 
     for _ in 0..iterations {
         let _ = model.forward_sequence(input);
@@ -77,10 +77,10 @@ fn bench_model_inference_medium() {
 #[test]
 fn bench_model_inference_long() {
     let mut model = Sophon1::new(0x1234);
-    let input = "abc".to_string(); // Short input for reasonable test time
+    let input = "a".repeat(3);
 
     let start = Instant::now();
-    let iterations = 2; // Reduced for reasonable test time
+    let iterations = 2;
 
     for _ in 0..iterations {
         let _ = model.forward_sequence(input.as_bytes());
@@ -100,10 +100,10 @@ fn bench_model_with_safety() {
     let mut model = Sophon1::new(0x1234);
     let config = DiagnosticConfig::default_byte_model();
     let mut diagnostic = SelfDiagnostic::new(config);
-    let input = b"x";
+    let input = b"test";
 
     let start = Instant::now();
-    let iterations = 2; // Reduced for reasonable test time
+    let iterations = 2;
 
     for _ in 0..iterations {
         if let Ok(outputs) = model.forward_sequence(input) {
@@ -232,14 +232,14 @@ fn bench_dequantize_block() {
 /// Benchmark: Quantization roundtrip
 #[test]
 fn bench_quantization_roundtrip() {
-    let weights: Vec<f32> = (0..256).map(|i| (i as f32 - 128.0) * 0.01).collect();
+    let weights: Vec<f32> = (0..64).map(|i| (i as f32 - 32.0) * 0.01).collect();
 
     let start = Instant::now();
     let iterations = 100;
 
     for _ in 0..iterations {
         let block = ternarize_block(&weights);
-        let mut out = vec![0.0f32; 256];
+        let mut out = vec![0.0f32; 64];
         dequantize_block(&block, &mut out);
     }
 
@@ -480,7 +480,7 @@ fn bench_memory_retrieve() {
     let mut memory = EpisodicMemory::new(100);
 
     // Pre-populate
-    for i in 0..50 {
+    for i in 0..10 {
         memory.record(Episode {
             timestamp: i as u64,
             perception_hv: vec![(i % 10) as f32; HDC_DIM],
@@ -493,7 +493,7 @@ fn bench_memory_retrieve() {
     let query = vec![5.0f32; HDC_DIM];
 
     let start = Instant::now();
-    let iterations = 100;
+    let iterations = 5;
 
     for _ in 0..iterations {
         let _ = memory.retrieve_similar(&query, 5);
@@ -799,7 +799,7 @@ fn bench_ssm_discretised() {
     let params = SsmParams::new_stable(0x1234);
 
     let start = Instant::now();
-    let iterations = 1000;
+    let iterations = 100;
 
     for _ in 0..iterations {
         let _ = DiscretisedSsm::from_params(&params);

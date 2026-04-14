@@ -102,11 +102,12 @@ impl Benchmark {
         self
     }
 
-    /// Run the benchmark with a model inference implementation.
+    /// Run the benchmark. Requires a model to be provided.
+    ///
+    /// # Panics
+    /// Panics if called directly - use `run_with_model()` instead.
     pub fn run(&self) -> BenchmarkResult {
-        // For backward compatibility: use a placeholder model
-        let mut placeholder = PlaceholderModel;
-        self.run_with_model(&mut placeholder)
+        panic!("Benchmark::run() requires a model. Use run_with_model() with a Sophon1 instance instead.")
     }
 
     /// Run the benchmark with a model inference implementation.
@@ -221,16 +222,6 @@ impl BenchmarkTask {
     pub fn with_verification(mut self, method: VerificationMethod) -> Self {
         self.verification = method;
         self
-    }
-}
-
-/// Placeholder model for backward compatibility.
-struct PlaceholderModel;
-
-impl ModelInference for PlaceholderModel {
-    fn generate(&mut self, _input: &str) -> Result<String, Box<dyn std::error::Error + Send>> {
-        // Return a simple placeholder response for backward compatibility
-        Ok("placeholder response".to_string())
     }
 }
 

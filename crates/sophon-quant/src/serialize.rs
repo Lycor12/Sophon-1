@@ -537,7 +537,7 @@ mod tests {
     #[test]
     fn header_validation_constants() {
         let mut w = make_writer();
-        w.add_f32_section("dummy", &[1.0, 2.0]);
+        w.add_f32_section("test_section", &[1.0, 2.0]);
 
         let mut buf = Cursor::new(Vec::new());
         w.write_to(&mut buf).unwrap();

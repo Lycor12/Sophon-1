@@ -523,12 +523,24 @@ fn cmd_agent() {
                 continue;
             }
             "/diag" => {
-                let dummy_logits = vec![0.0f32; 256];
-                let result = diagnostic.check(&dummy_logits);
-                eprintln!(
-                    "Diagnostic: passed={} faults={:?} stage={}",
-                    result.passed, result.faults, result.halted_at_stage
-                );
+                // Use actual model output for diagnostic, not dummy logits
+                let test_input = b"test";
+                match model.forward_sequence(test_input) {
+                    Ok(outputs) => {
+                        if let Some(last) = outputs.last() {
+                            let result = diagnostic.check(last.logits.as_slice());
+                            eprintln!(
+                                "Diagnostic: passed={} faults={:?} stage={}",
+                                result.passed, result.faults, result.halted_at_stage
+                            );
+                        } else {
+                            eprintln!("Diagnostic: no output from model");
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Diagnostic failed: model error: {}", e);
+                    }
+                }
                 continue;
             }
             _ => {}
@@ -572,7 +584,8 @@ fn cmd_agent() {
 
             // Gradient-based belief update
             let grad = world_model.grad_mu_prediction_error(&pred_error);
-            belief.update(&grad, &[], 0.01);
+            let grad_log_sigma = vec![0.0f32; belief_dim];
+            belief.update(&grad, &grad_log_sigma, 0.01);
 
             eprintln!(
                 "[step={step}] tokens={} pred_error={:.4} belief_mag={:.4}",

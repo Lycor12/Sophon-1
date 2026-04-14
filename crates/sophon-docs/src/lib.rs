@@ -1,14 +1,17 @@
 //! Documentation generator for Sophon AGI
 //!
-//! Generates comprehensive documentation from code and external sources.
+//! Generates beautiful HTML documentation from code and external sources.
 //! Features:
 //! - Rust doc extraction and cross-referencing
-//! - Architecture diagrams (ASCII art)
+//! - Beautiful HTML output with syntax highlighting
+//! - Search functionality
+//! - Responsive design with dark/light mode
+//! - Architecture diagrams
 //! - API reference generation
-//! - Tutorial and guide compilation
-//! - Search index generation
 
 #![forbid(unsafe_code)]
+
+pub mod html;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -154,19 +157,251 @@ impl DocGenerator {
         // Generate crate documentation
         self.generate_crate_docs()?;
 
+        // Generate individual crate documentation files
+        self.write_crate_files()?;
+
         // Generate index
         self.generate_index()?;
 
         // Generate search index
         self.generate_search_index()?;
 
+        // Generate beautiful HTML documentation
+        let mut html_gen = html::HtmlGenerator::new(&self.output);
+        html_gen.generate(&self.crates)?;
+
+        Ok(())
+    }
+
+    /// Generate HTML documentation only
+    pub fn generate_html(&mut self) -> Result<(), DocError> {
+        // Generate crate documentation first
+        self.generate_crate_docs()?;
+
+        // Generate HTML
+        let mut html_gen = html::HtmlGenerator::new(&self.output);
+        html_gen.generate(&self.crates)?;
+
+        Ok(())
+    }
+
+    /// Write individual crate and module documentation files
+    fn write_crate_files(&self) -> Result<(), DocError> {
+        use std::fs;
+
+        for (crate_name, crate_docs) in &self.crates {
+            // Create crate directory
+            let crate_dir = self.output.join(crate_name);
+            fs::create_dir_all(&crate_dir).map_err(|e| DocError::Io(e.to_string()))?;
+
+            // Write crate overview
+            let crate_path = crate_dir.join("index.md");
+            let mut crate_content = String::new();
+            crate_content.push_str(&format!("# Crate: {}\n\n", crate_name));
+            crate_content.push_str(&format!("{}\n\n", crate_docs.description));
+
+            // List modules
+            if !crate_docs.modules.is_empty() {
+                crate_content.push_str("## Modules\n\n");
+                for module in &crate_docs.modules {
+                    crate_content.push_str(&format!("- [{}]({}.md)\n", module.path, module.path));
+                }
+                crate_content.push('\n');
+            }
+
+            // List public items
+            if !crate_docs.items.is_empty() {
+                crate_content.push_str("## Public Items\n\n");
+                for item in &crate_docs.items {
+                    crate_content.push_str(&format!("### {} `{}`\n\n", item.kind, item.name));
+                    if !item.docs.is_empty() {
+                        crate_content.push_str(&item.docs);
+                        crate_content.push_str("\n\n");
+                    }
+                    crate_content.push_str(&format!(
+                        "**Source:** {}:{}\n\n",
+                        item.source.display(),
+                        item.line
+                    ));
+                }
+            }
+
+            fs::write(&crate_path, crate_content).map_err(|e| DocError::Io(e.to_string()))?;
+
+            // Write individual module files
+            for module in &crate_docs.modules {
+                let module_path = crate_dir.join(format!("{}.md", module.path));
+                let mut module_content = String::new();
+                module_content.push_str(&format!("# Module: {}\n\n", module.path));
+
+                if !module.docs.is_empty() {
+                    module_content.push_str(&module.docs);
+                    module_content.push_str("\n\n");
+                }
+
+                // List items in module
+                if !module.items.is_empty() {
+                    module_content.push_str("## Items\n\n");
+                    for item in &module.items {
+                        module_content.push_str(&format!("### {} `{}`\n\n", item.kind, item.name));
+                        if !item.docs.is_empty() {
+                            module_content.push_str(&item.docs);
+                            module_content.push_str("\n\n");
+                        }
+                        module_content
+                            .push_str(&format!("**Signature:** `{}`\n\n", item.signature));
+                        module_content.push_str(&format!(
+                            "**Source:** {}:{}\n\n",
+                            item.source.display(),
+                            item.line
+                        ));
+                    }
+                }
+
+                fs::write(&module_path, module_content).map_err(|e| DocError::Io(e.to_string()))?;
+            }
+        }
+
         Ok(())
     }
 
     fn generate_crate_docs(&mut self) -> Result<(), DocError> {
-        // This would parse Rust source files and extract documentation
-        // For now, placeholder
+        // Extract documentation from Rust source files
+        use std::fs;
+        use std::io::Read;
+
+        for root in &self.roots {
+            let crate_name = root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let mut crate_docs = CrateDocs {
+                name: crate_name.clone(),
+                description: format!("Documentation for {}", crate_name),
+                modules: Vec::new(),
+                items: Vec::new(),
+                dependencies: Vec::new(),
+            };
+
+            // Scan for .rs files
+            if let Ok(entries) = fs::read_dir(root.join("src")) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                        let mut file =
+                            fs::File::open(&path).map_err(|e| DocError::Io(e.to_string()))?;
+                        let mut content = String::new();
+                        file.read_to_string(&mut content)
+                            .map_err(|e| DocError::Io(e.to_string()))?;
+
+                        // Extract doc comments and public items
+                        let module_name = path
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+
+                        let (docs, items) = Self::extract_docs_from_source(&content, &path);
+
+                        crate_docs.modules.push(ModuleDocs {
+                            path: module_name,
+                            docs,
+                            items,
+                        });
+                    }
+                }
+            }
+
+            self.crates.insert(crate_name, crate_docs);
+        }
+
         Ok(())
+    }
+
+    /// Extract documentation from Rust source content
+    fn extract_docs_from_source(content: &str, source_path: &Path) -> (String, Vec<ItemDocs>) {
+        let mut docs = String::new();
+        let mut items = Vec::new();
+        let mut current_doc = String::new();
+        let mut line_num = 0;
+
+        for line in content.lines() {
+            line_num += 1;
+            let trimmed = line.trim();
+
+            if trimmed.starts_with("///") || trimmed.starts_with("//!") {
+                let doc_line = if trimmed.starts_with("/// ") {
+                    &trimmed[4..]
+                } else if trimmed.starts_with("///") {
+                    &trimmed[3..]
+                } else if trimmed.starts_with("//! ") {
+                    &trimmed[4..]
+                } else {
+                    &trimmed[3..]
+                };
+                current_doc.push_str(doc_line);
+                current_doc.push('\n');
+            } else if trimmed.starts_with("pub fn ") || trimmed.starts_with("pub fn\t") {
+                let name = trimmed
+                    .split_whitespace()
+                    .nth(2)
+                    .and_then(|n| n.split('(').next())
+                    .unwrap_or("unknown")
+                    .to_string();
+                items.push(ItemDocs {
+                    name,
+                    kind: ItemKind::Function,
+                    docs: current_doc.clone().trim().to_string(),
+                    signature: trimmed.to_string(),
+                    source: source_path.to_path_buf(),
+                    line: line_num,
+                });
+                current_doc.clear();
+            } else if trimmed.starts_with("pub struct ") || trimmed.starts_with("pub struct\t") {
+                let name = trimmed
+                    .split_whitespace()
+                    .nth(2)
+                    .and_then(|n| n.split('{').next())
+                    .and_then(|n| n.split('(').next())
+                    .unwrap_or("unknown")
+                    .to_string();
+                items.push(ItemDocs {
+                    name,
+                    kind: ItemKind::Struct,
+                    docs: current_doc.clone().trim().to_string(),
+                    signature: trimmed.to_string(),
+                    source: source_path.to_path_buf(),
+                    line: line_num,
+                });
+                current_doc.clear();
+            } else if trimmed.starts_with("pub enum ") || trimmed.starts_with("pub enum\t") {
+                let name = trimmed
+                    .split_whitespace()
+                    .nth(2)
+                    .and_then(|n| n.split('{').next())
+                    .unwrap_or("unknown")
+                    .to_string();
+                items.push(ItemDocs {
+                    name,
+                    kind: ItemKind::Enum,
+                    docs: current_doc.clone().trim().to_string(),
+                    signature: trimmed.to_string(),
+                    source: source_path.to_path_buf(),
+                    line: line_num,
+                });
+                current_doc.clear();
+            } else if !trimmed.is_empty() && !trimmed.starts_with("//") {
+                // End of doc block
+                if !current_doc.is_empty() && docs.is_empty() {
+                    docs = current_doc.clone().trim().to_string();
+                }
+                current_doc.clear();
+            }
+        }
+
+        (docs, items)
     }
 
     fn generate_index(&self) -> Result<(), DocError> {

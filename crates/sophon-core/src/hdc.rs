@@ -25,7 +25,6 @@
 #![allow(clippy::needless_range_loop)]
 
 use crate::CoreError;
-use sophon_config::HDC_DIM;
 
 // ===========================================================================
 // Complex number type (minimal, inline)

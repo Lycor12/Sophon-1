@@ -39,7 +39,17 @@ fn print_help() {
 fn cmd_generate(args: &[String]) {
     let output = args.first().map(|s| s.as_str()).unwrap_or("docs");
     let mut generator = sophon_docs::DocGenerator::new(output);
-    generator.add_root("crates/");
+
+    // Add each crate directory under crates/
+    let crates_dir = std::path::Path::new("crates");
+    if let Ok(entries) = std::fs::read_dir(crates_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join("src").exists() {
+                generator.add_root(&path);
+            }
+        }
+    }
 
     match generator.generate() {
         Ok(()) => println!("Documentation generated in {}", output),
