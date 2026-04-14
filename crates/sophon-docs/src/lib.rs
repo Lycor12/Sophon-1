@@ -150,15 +150,12 @@ impl DocGenerator {
         self.roots.push(path.as_ref().to_path_buf());
     }
 
-    /// Generate all documentation
+    /// Generate all documentation (HTML output only)
     pub fn generate(&mut self) -> Result<(), DocError> {
         std::fs::create_dir_all(&self.output).map_err(|e| DocError::Io(e.to_string()))?;
 
         // Generate crate documentation
         self.generate_crate_docs()?;
-
-        // Generate individual crate documentation files
-        self.write_crate_files()?;
 
         // Generate index
         self.generate_index()?;

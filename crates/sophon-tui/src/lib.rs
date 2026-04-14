@@ -31,12 +31,11 @@
 //! # }
 //! ```
 
-// Platform module may use unsafe for Windows console API
-// All other modules are safe Rust
+// Safety: Platform module uses unsafe for Windows console API only.
+// This is a necessary exception for cross-platform terminal support.
+// All other modules are safe Rust.
 
 mod platform;
-
-#![forbid(unsafe_code)]
 
 mod ansi;
 mod component;

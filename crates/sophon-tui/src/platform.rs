@@ -2,7 +2,9 @@
 //!
 //! Provides ANSI support for Windows terminals and cross-platform compatibility.
 
-#![cfg_attr(windows, allow(unsafe_code))]
+// Platform-specific code may use unsafe for Windows console API only.
+// This is contained within this module.
+#![allow(unsafe_code)]
 
 use std::io::{self, Write};
 

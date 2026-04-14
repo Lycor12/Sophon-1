@@ -3,7 +3,7 @@
 //! Generates beautiful HTML documentation from Rust source code.
 //! Uses Handlebars-style templating for structure, CSS for styling.
 
-use crate::{CrateDocs, DocError, ItemDocs, ItemKind, ModuleDocs};
+use crate::{CrateDocs, DocError};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -12,10 +12,6 @@ use std::path::{Path, PathBuf};
 pub struct HtmlGenerator {
     /// Output directory
     output: PathBuf,
-    /// Templates directory
-    templates_dir: PathBuf,
-    /// Assets directory
-    assets_dir: PathBuf,
     /// Search index
     search_index: Vec<SearchEntry>,
 }
@@ -34,8 +30,6 @@ impl HtmlGenerator {
     pub fn new(output: impl AsRef<Path>) -> Self {
         let output = output.as_ref().to_path_buf();
         HtmlGenerator {
-            templates_dir: PathBuf::from("templates"),
-            assets_dir: PathBuf::from("assets"),
             output,
             search_index: Vec::new(),
         }
@@ -74,7 +68,7 @@ impl HtmlGenerator {
     fn copy_stylesheet(&self) -> Result<(), DocError> {
         let css_path = self.output.join("assets").join("styles.css");
 
-        // Create styles.css inline
+        // Inline CSS since templates aren't in external files
         let css = include_str!("../templates/styles.css");
 
         fs::write(&css_path, css).map_err(|e| DocError::Io(e.to_string()))?;
@@ -84,123 +78,322 @@ impl HtmlGenerator {
 
     /// Generate JavaScript files
     fn generate_js(&self) -> Result<(), DocError> {
-        // Theme toggle script
+        // Theme toggle script with animation
         let theme_js = r#"(function() {
-    const theme = localStorage.getItem('theme') || 'light';
-    document.documentElement.setAttribute('data-theme', theme);
-    
-    document.getElementById('theme-toggle').addEventListener('click', function() {
-        const current = document.documentElement.getAttribute('data-theme');
-        const next = current === 'dark' ? 'light' : 'dark';
-        document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('theme', next);
+  // Initialize theme
+  const savedTheme = localStorage.getItem('theme');
+  const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  const theme = savedTheme || systemTheme;
+  document.documentElement.setAttribute('data-theme', theme);
+
+  // Theme toggle handler
+  const themeToggle = document.getElementById('theme-toggle');
+  if (themeToggle) {
+    themeToggle.addEventListener('click', function() {
+      const current = document.documentElement.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+
+      // Add animation class
+      document.body.classList.add('theme-transitioning');
+      setTimeout(() => {
+        document.body.classList.remove('theme-transitioning');
+      }, 300);
     });
+  }
+
+  // Listen for system theme changes
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+    if (!localStorage.getItem('theme')) {
+      document.documentElement.setAttribute('data-theme', e.matches ? 'dark' : 'light');
+    }
+  });
 })();"#;
 
         fs::write(self.output.join("assets/theme.js"), theme_js)
             .map_err(|e| DocError::Io(e.to_string()))?;
 
-        // Mobile menu toggle
+        // Mobile menu toggle with animation
         let menu_js = r#"(function() {
-    const toggle = document.getElementById('menu-toggle');
-    const sidebar = document.getElementById('sidebar');
-    
-    if (toggle && sidebar) {
-        toggle.addEventListener('click', function() {
-            sidebar.classList.toggle('open');
-        });
-    }
+  const toggle = document.getElementById('menu-toggle');
+  const sidebar = document.getElementById('sidebar');
+  const overlay = document.createElement('div');
+  overlay.className = 'sidebar-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99;opacity:0;visibility:hidden;transition:all 0.3s ease;';
+  document.body.appendChild(overlay);
+
+  function toggleMenu() {
+    sidebar.classList.toggle('open');
+    const isOpen = sidebar.classList.contains('open');
+    overlay.style.opacity = isOpen ? '1' : '0';
+    overlay.style.visibility = isOpen ? 'visible' : 'hidden';
+    toggle.classList.toggle('active', isOpen);
+  }
+
+  if (toggle && sidebar) {
+    toggle.addEventListener('click', toggleMenu);
+    overlay.addEventListener('click', toggleMenu);
+  }
+
+  if (toggle && sidebar) {
+    toggle.addEventListener('click', function() {
+      sidebar.classList.toggle('open');
+    });
+  }
 })();"#;
 
         fs::write(self.output.join("assets/menu.js"), menu_js)
             .map_err(|e| DocError::Io(e.to_string()))?;
 
-        // Search functionality
+        // Search functionality with keyboard navigation
         let search_js = r#"(function() {
-    const searchInput = document.getElementById('search-input');
-    const modal = document.getElementById('search-overlay');
-    const modalInput = document.getElementById('modal-search-input');
-    const results = document.getElementById('search-results');
-    const closeBtn = document.getElementById('search-close');
-    
-    let searchData = [];
-    
-    // Load search index
-    fetch('assets/search.json')
-        .then(r => r.json())
-        .then(data => { searchData = data; })
-        .catch(e => console.error('Failed to load search index:', e));
-    
-    function openModal() {
-        modal.classList.add('active');
-        modalInput.focus();
-        modalInput.value = searchInput.value;
-        performSearch(modalInput.value);
-    }
-    
-    function closeModal() {
-        modal.classList.remove('active');
-    }
-    
-    function performSearch(query) {
-        if (!query || query.length < 2) {
-            results.innerHTML = '<div class="search-result"><div class="search-result-title">Type to search...</div></div>';
-            return;
-        }
-        
-        const q = query.toLowerCase();
-        const matches = searchData
-            .filter(item => 
-                item.title.toLowerCase().includes(q) || 
-                item.content.toLowerCase().includes(q)
-            )
-            .slice(0, 10);
-        
-        if (matches.length === 0) {
-            results.innerHTML = '<div class="search-result"><div class="search-result-title">No results found</div></div>';
-            return;
-        }
-        
-        results.innerHTML = matches.map(item => 
-            '<div class="search-result" onclick="location.href=\'' + item.path + '\'">' +
-            '<div class="search-result-title">' + escapeHtml(item.title) + '</div>' +
-            '<div class="search-result-path">' + escapeHtml(item.path) + '</div>' +
-            '</div>'
-        ).join('');
-    }
-    
-    function escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-    
-    if (searchInput) {
-        searchInput.addEventListener('focus', openModal);
-    }
-    
-    if (modalInput) {
-        modalInput.addEventListener('input', function() {
-            performSearch(this.value);
-        });
-    }
-    
-    if (closeBtn) {
-        closeBtn.addEventListener('click', closeModal);
-    }
-    
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
-            closeModal();
-        }
-        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-            e.preventDefault();
-            openModal();
-        }
+  const searchInput = document.getElementById('search-input');
+  const modal = document.getElementById('search-overlay');
+  const modalInput = document.getElementById('modal-search-input');
+  const results = document.getElementById('search-results');
+  const closeBtn = document.getElementById('search-close');
+
+  let searchData = [];
+  let selectedIndex = -1;
+
+  // Load search index
+  fetch('assets/search.json')
+    .then(r => r.json())
+    .then(data => { searchData = data; })
+    .catch(e => console.error('Failed to load search index:', e));
+
+  function openModal() {
+    modal.classList.add('active');
+    modalInput.focus();
+    modalInput.value = searchInput.value;
+    selectedIndex = -1;
+    performSearch(modalInput.value);
+  }
+
+  function closeModal() {
+    modal.classList.remove('active');
+    selectedIndex = -1;
+  }
+
+  function updateSelection() {
+    const items = results.querySelectorAll('.search-result');
+    items.forEach((item, i) => {
+      item.classList.toggle('selected', i === selectedIndex);
+      if (i === selectedIndex) {
+        item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      }
     });
+  }
+
+  function performSearch(query) {
+    if (!query || query.length < 2) {
+      results.innerHTML = '<div class="search-result"><div class="search-result-title">Type to search...</div></div>';
+      return;
+    }
+
+    const q = query.toLowerCase();
+    const matches = searchData
+      .filter(item =>
+        item.title.toLowerCase().includes(q) ||
+        item.content.toLowerCase().includes(q)
+      )
+      .slice(0, 10);
+
+    if (matches.length === 0) {
+      results.innerHTML = '<div class="search-result"><div class="search-result-title">No results found</div></div>';
+      return;
+    }
+
+    results.innerHTML = matches.map((item, index) =>
+      '<div class="search-result" data-index="' + index + '" onclick="location.href=\'' + item.path + '\'">' +
+      '<div class="search-result-title">' + escapeHtml(item.title) + '</div>' +
+      '<div class="search-result-path">' + escapeHtml(item.path) + '</div>' +
+      '<div class="search-result-desc">' + escapeHtml(item.content.slice(0, 100)) + '...</div>' +
+      '</div>'
+    ).join('');
+    selectedIndex = -1;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  if (searchInput) {
+    searchInput.addEventListener('focus', openModal);
+  }
+
+  if (modalInput) {
+    modalInput.addEventListener('input', function() {
+      performSearch(this.value);
+    });
+  }
+
+  if (closeBtn) {
+    closeBtn.addEventListener('click', closeModal);
+  }
+
+  // Keyboard navigation
+  document.addEventListener('keydown', function(e) {
+    if (!modal.classList.contains('active')) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        openModal();
+      }
+      return;
+    }
+
+    const items = results.querySelectorAll('.search-result');
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeModal();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      selectedIndex = Math.min(selectedIndex + 1, items.length - 1);
+      updateSelection();
+      return;
+    }
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      selectedIndex = Math.max(selectedIndex - 1, 0);
+      updateSelection();
+      return;
+    }
+
+    if (e.key === 'Enter' && selectedIndex >= 0) {
+      e.preventDefault();
+      items[selectedIndex].click();
+      return;
+    }
+  });
 })();"#;
 
         fs::write(self.output.join("assets/search.js"), search_js)
+            .map_err(|e| DocError::Io(e.to_string()))?;
+
+        // Scroll animations with IntersectionObserver
+        let scroll_js = r#"(function() {
+  // IntersectionObserver for scroll animations
+  const observerOptions = {
+    root: null,
+    rootMargin: '0px',
+    threshold: 0.1
+  };
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('animate-in');
+        // Optionally unobserve after animation
+        // observer.unobserve(entry.target);
+      }
+    });
+  }, observerOptions);
+
+  // Observe elements with data-animate attribute
+  document.querySelectorAll('[data-animate]').forEach(el => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(20px)';
+    el.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
+    observer.observe(el);
+  });
+
+  // Add animate-in styles
+  const style = document.createElement('style');
+  style.textContent = '[data-animate].animate-in { opacity: 1 !important; transform: translateY(0) !important; }';
+  document.head.appendChild(style);
+})();"#;
+
+        fs::write(self.output.join("assets/scroll.js"), scroll_js)
+            .map_err(|e| DocError::Io(e.to_string()))?;
+
+        // Code block copy functionality
+        let code_js = r##"(function() {
+  // Add copy buttons to code blocks
+  document.querySelectorAll('pre code').forEach(codeBlock => {
+    const pre = codeBlock.parentElement;
+    pre.style.position = 'relative';
+
+    const button = document.createElement('button');
+    button.className = 'copy-button';
+    button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    button.setAttribute('aria-label', 'Copy to clipboard');
+    button.style.cssText = 'position:absolute;top:12px;right:12px;padding:6px;border-radius:6px;background:var(--bg-tertiary);border:1px solid var(--border-color);color:var(--text-secondary);cursor:pointer;opacity:0;transition:opacity 0.2s,background 0.2s;';
+
+    pre.addEventListener('mouseenter', () => button.style.opacity = '1');
+    pre.addEventListener('mouseleave', () => button.style.opacity = '0');
+
+    button.addEventListener('click', async () => {
+      try {
+        const text = codeBlock.textContent;
+        await navigator.clipboard.writeText(text);
+        button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>';
+        button.style.color = '#10b981';
+        setTimeout(() => {
+          button.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+          button.style.color = 'var(--text-secondary)';
+        }, 2000);
+      } catch (err) {
+        console.error('Failed to copy:', err);
+      }
+    });
+
+    pre.appendChild(button);
+  });
+})();"##;
+
+        fs::write(self.output.join("assets/code.js"), code_js)
+            .map_err(|e| DocError::Io(e.to_string()))?;
+
+        // Floating TOC highlighting
+        let toc_js = r##"(function() {
+  // Highlight current section in TOC
+  const headings = document.querySelectorAll('h1[id], h2[id], h3[id], h4[id]');
+  const tocLinks = document.querySelectorAll('.toc a');
+
+  if (headings.length === 0 || tocLinks.length === 0) return;
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        const id = entry.target.getAttribute('id');
+        tocLinks.forEach(link => {
+          link.classList.remove('active');
+          if (link.getAttribute('href') === '#' + id) {
+            link.classList.add('active');
+          }
+        });
+      }
+    });
+  }, {
+    rootMargin: '-20% 0px -80% 0px',
+    threshold: 0
+  });
+
+  headings.forEach(h => observer.observe(h));
+
+  // Smooth scroll for anchor links
+  document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+    anchor.addEventListener('click', function(e) {
+      const targetId = this.getAttribute('href').slice(1);
+      const target = document.getElementById(targetId);
+      if (target) {
+        e.preventDefault();
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        history.pushState(null, null, '#' + targetId);
+      }
+    });
+  });
+})();"##;
+
+        fs::write(self.output.join("assets/toc.js"), toc_js)
             .map_err(|e| DocError::Io(e.to_string()))?;
 
         Ok(())
@@ -211,23 +404,13 @@ impl HtmlGenerator {
         let mut crate_list = String::new();
 
         for (name, docs) in crates {
-            let mut modules_html = String::new();
-            for module in &docs.modules {
-                modules_html.push_str(&format!(
-                    r#"<li><a href="crates/{}/{}.html">{}</a></li>"#,
-                    name, module.path, module.path
-                ));
-            }
-
             crate_list.push_str(&format!(
                 r#"<div class="crate-card">
-                    <h3><a href="crates/{0}/index.html">{0}</a></h3>
-                    <p>{1}</p>
-                    <ul>{2}</ul>
-                </div>"#,
+  <h3><a href="crates/{0}/index.html">{0}</a></h3>
+  <p>{1}</p>
+</div>"#,
                 name,
-                markdown_to_html(&docs.description),
-                modules_html
+                markdown_to_html(&docs.description)
             ));
 
             // Add to search index
@@ -310,6 +493,17 @@ impl HtmlGenerator {
         if !crate_docs.modules.is_empty() {
             content.push_str(r#"<h2>Modules</h2><div class="modules-grid">"#);
             for module in &crate_docs.modules {
+                let module_desc = if module.docs.is_empty() {
+                    "No documentation available.".to_string()
+                } else {
+                    let first_line = module.docs.lines().next().unwrap_or("");
+                    let chars: Vec<char> = first_line.chars().collect();
+                    if chars.len() > 60 {
+                        chars[..60].iter().collect()
+                    } else {
+                        first_line.to_string()
+                    }
+                };
                 content.push_str(&format!(
                     r#"<div class="module-card">
                         <h3><a href="{}.html">{}</a></h3>
@@ -317,11 +511,7 @@ impl HtmlGenerator {
                     </div>"#,
                     module.path,
                     module.path,
-                    if module.docs.is_empty() {
-                        "No documentation available."
-                    } else {
-                        &module.docs.lines().next().unwrap_or("")[..60.min(module.docs.len())]
-                    }
+                    html_escape(&module_desc)
                 ));
             }
             content.push_str("</div>");
@@ -606,11 +796,14 @@ impl HtmlGenerator {
         </div>
     </div>
     
-    <script src="{}assets/search.js"></script>
-    <script src="{}assets/theme.js"></script>
-    <script src="{}assets/menu.js"></script>
-</body>
-</html>"#,
+<script src="{}assets/search.js"></script>
+      <script src="{}assets/theme.js"></script>
+      <script src="{}assets/menu.js"></script>
+      <script src="{}assets/scroll.js"></script>
+      <script src="{}assets/code.js"></script>
+      <script src="{}assets/toc.js"></script>
+    </body>
+    </html>"#,
             title,
             base_path,
             base_path,
@@ -621,6 +814,9 @@ impl HtmlGenerator {
             content,
             base_path,
             base_path,
+            base_path,
+            base_path,
+            base_path,
             base_path
         );
 
@@ -629,10 +825,11 @@ impl HtmlGenerator {
 }
 
 /// Simple markdown to HTML conversion
+#[allow(unused_assignments)]
 fn markdown_to_html(md: &str) -> String {
     let mut html = String::new();
     let mut in_code = false;
-    let mut code_lang = String::new();
+    let mut _code_lang = String::new();
 
     for line in md.lines() {
         if line.starts_with("```") {
@@ -640,8 +837,8 @@ fn markdown_to_html(md: &str) -> String {
                 html.push_str("</code></pre>");
                 in_code = false;
             } else {
-                code_lang = line[3..].trim().to_string();
-                html.push_str(&format!(r#"<pre><code class="language-{}">"#, code_lang));
+                _code_lang = line[3..].trim().to_string();
+                html.push_str(r#"<pre><code>"#);
                 in_code = true;
             }
         } else if in_code {
@@ -658,23 +855,6 @@ fn markdown_to_html(md: &str) -> String {
         } else if line.trim().is_empty() {
             html.push_str("<p>");
         } else {
-            // Inline code
-            let mut result = String::new();
-            let mut chars = line.chars().peekable();
-            while let Some(ch) = chars.next() {
-                if ch == '`' {
-                    if let Some(end) = chars
-                        .by_ref()
-                        .take_while(|c| *c != '`')
-                        .collect::<String>()
-                        .into()
-                    {
-                        result.push_str(&format!("<code>{}</code>", html_escape(&end)));
-                    }
-                } else {
-                    result.push(ch);
-                }
-            }
             html.push_str(&format!("<p>{}</p>", html_escape(line)));
         }
     }
