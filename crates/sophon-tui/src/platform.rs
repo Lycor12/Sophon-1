@@ -2,6 +2,8 @@
 //!
 //! Provides ANSI support for Windows terminals and cross-platform compatibility.
 
+#![cfg_attr(windows, allow(unsafe_code))]
+
 use std::io::{self, Write};
 
 /// Initialize terminal for ANSI output

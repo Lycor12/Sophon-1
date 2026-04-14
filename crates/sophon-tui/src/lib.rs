@@ -31,6 +31,11 @@
 //! # }
 //! ```
 
+// Platform module may use unsafe for Windows console API
+// All other modules are safe Rust
+
+mod platform;
+
 #![forbid(unsafe_code)]
 
 mod ansi;
@@ -40,7 +45,6 @@ mod element;
 mod hook;
 mod input;
 mod layout;
-mod platform;
 mod render;
 mod renderer;
 mod style;
